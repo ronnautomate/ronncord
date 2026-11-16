@@ -32,6 +32,8 @@ jobs:
         run: npm install
 
       - name: Build application
+        env:
+          VITE_API_URL: https://ronncord.onrender.com
         run: npm run build
 
       - name: Upload website
