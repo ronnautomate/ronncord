@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import {
   Hash, Volume2, Plus, Settings, Mic, MicOff, Headphones, HeadphoneOff,
   UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff,
-  MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2
+  MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2, X
 } from 'lucide-react';
 import { apiFetch, connectSocket, getToken, setToken, resolveAssetUrl } from './lib/api.js';
 import { VoiceManager, getSavedUserVolumes } from './lib/voiceManager.js';
@@ -107,6 +107,7 @@ function App() {
   const [localCameraStream, setLocalCameraStream] = useState(null);
   const [localScreenStream, setLocalScreenStream] = useState(null);
   const [remoteVideos, setRemoteVideos] = useState([]);
+  const [hiddenVideoIds, setHiddenVideoIds] = useState([]);
   const [voiceSettings, setVoiceSettings] = useState(getSavedVoiceSettings);
 
   const [showMembers, setShowMembers] = useState(true);
@@ -301,7 +302,7 @@ function App() {
       socket?.disconnect();
       socketRef.current = null;
     };
-  }, [user, isDemo]);
+  }, [user?.id, isDemo]);
 
   // Load channel or DM messages
   useEffect(() => {
@@ -927,12 +928,16 @@ function App() {
                   SoundFX.leaveVoice();
                   voiceChannelIdRef.current = null;
                   voiceCountRef.current = 0;
-                  await voiceManagerRef.current?.leave();
+                  try {
+                    await voiceManagerRef.current?.leave();
+                  } catch {}
                   setVoiceChannelId(null);
                   setIsCameraOn(false);
                   setIsScreenSharing(false);
                   setLocalCameraStream(null);
                   setLocalScreenStream(null);
+                  setRemoteVideos([]);
+                  setHiddenVideoIds([]);
                 }}
               >
                 <PhoneOff size={16} />
@@ -975,7 +980,7 @@ function App() {
 
       {/* Main Content */}
       <div className="main-stage">
-        {(localCameraStream || localScreenStream || remoteVideos.length > 0) && (
+        {(localCameraStream || localScreenStream || remoteVideos.some(v => !hiddenVideoIds.includes(v.id))) && (
           <div className="screen-share-stage">
             {localCameraStream && (
               <div className="screen-tile">
@@ -1009,9 +1014,16 @@ function App() {
                   }}
                 />
                 <div className="screen-label">Sua Tela • 1080p 60fps AO VIVO</div>
+                <button
+                  className="screen-fullscreen-btn"
+                  title="Parar Transmissão de Tela"
+                  onClick={toggleScreenShare}
+                >
+                  <X size={14} />
+                </button>
               </div>
             )}
-            {remoteVideos.map(v => (
+            {remoteVideos.filter(v => !hiddenVideoIds.includes(v.id)).map(v => (
               <div key={v.id} className="screen-tile">
                 <video
                   autoPlay
@@ -1024,13 +1036,24 @@ function App() {
                 <div className="screen-label">
                   {v.kind === 'camera' ? `Câmera de ${v.displayName}` : `Tela de ${v.displayName} • 1080p 60fps`}
                 </div>
-                <button
-                  className="screen-fullscreen-btn"
-                  title="Tela Cheia"
-                  onClick={e => e.currentTarget.parentElement?.querySelector('video')?.requestFullscreen?.()}
-                >
-                  <Maximize2 size={14} />
-                </button>
+                <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
+                  <button
+                    className="screen-fullscreen-btn"
+                    style={{ position: 'static' }}
+                    title="Tela Cheia"
+                    onClick={e => e.currentTarget.closest('.screen-tile')?.querySelector('video')?.requestFullscreen?.()}
+                  >
+                    <Maximize2 size={14} />
+                  </button>
+                  <button
+                    className="screen-fullscreen-btn"
+                    style={{ position: 'static' }}
+                    title="Fechar Visualização"
+                    onClick={() => setHiddenVideoIds(prev => [...prev, v.id])}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
