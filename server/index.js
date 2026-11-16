@@ -13,7 +13,19 @@ import { db, sanitizeUser } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4000);
-const JWT_SECRET = process.env.JWT_SECRET || 'ronncord-dev-secret-change-in-prod';
+
+function resolveJwtSecret() {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  const secretFile = path.join(__dirname, 'data', '.jwt-secret');
+  fs.mkdirSync(path.dirname(secretFile), { recursive: true });
+  if (fs.existsSync(secretFile)) {
+    return fs.readFileSync(secretFile, 'utf8').trim();
+  }
+  const generated = crypto.randomBytes(48).toString('hex');
+  fs.writeFileSync(secretFile, generated, { mode: 0o600 });
+  return generated;
+}
+const JWT_SECRET = resolveJwtSecret();
 
 const uploadsDir = path.join(__dirname, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
@@ -25,10 +37,24 @@ const io = new SocketIOServer(server, {
   maxHttpBufferSize: 50 * 1024 * 1024
 });
 
-// No rate limits — unlimited self-hosted API
+// Security headers + No rate limits — unlimited self-hosted API
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
-app.use('/uploads', express.static(uploadsDir));
+
+const SAFE_INLINE_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+app.use('/uploads', (req, res, next) => {
+  const ext = path.extname(req.path || '').toLowerCase();
+  if (!SAFE_INLINE_IMAGE_EXTS.has(ext)) {
+    res.setHeader('Content-Disposition', 'attachment');
+  }
+  next();
+}, express.static(uploadsDir));
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadsDir),
@@ -386,11 +412,26 @@ app.delete('/api/messages/:messageId', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
+function userCanAccessChannel(userId, channelId) {
+  const ch = db.prepare('SELECT server_id FROM channels WHERE id = ?').get(channelId);
+  if (!ch) return false;
+  return Boolean(db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(ch.server_id, userId));
+}
+
+function userCanAccessDm(userId, threadId) {
+  return Boolean(db.prepare('SELECT 1 FROM dm_threads WHERE id = ? AND (user1_id = ? OR user2_id = ?)').get(threadId, userId, userId));
+}
+
 app.post('/api/messages/:messageId/reactions', authMiddleware, (req, res) => {
   const { emoji } = req.body || {};
   if (!emoji) return res.status(400).json({ error: 'Emoji obrigatório' });
   const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.messageId);
   if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+
+  const hasAccess = msg.channel_id
+    ? userCanAccessChannel(req.user.id, msg.channel_id)
+    : userCanAccessDm(req.user.id, msg.dm_thread_id);
+  if (!hasAccess) return res.status(403).json({ error: 'Sem acesso a esta mensagem' });
 
   const existing = db.prepare('SELECT 1 FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?').get(msg.id, req.user.id, emoji);
   if (existing) {
@@ -536,16 +577,20 @@ io.on('connection', (socket) => {
   io.emit('presence:update', { userId, status: socket.user.status === 'offline' ? 'online' : socket.user.status });
 
   socket.on('join_channel', (channelId) => {
+    if (!userCanAccessChannel(userId, channelId)) return;
     socket.join(`channel:${channelId}`);
   });
   socket.on('leave_channel', (channelId) => {
     socket.leave(`channel:${channelId}`);
   });
   socket.on('join_dm', (threadId) => {
+    if (!userCanAccessDm(userId, threadId)) return;
     socket.join(`dm:${threadId}`);
   });
 
   socket.on('typing_start', ({ channelId, dmThreadId }) => {
+    if (channelId && !userCanAccessChannel(userId, channelId)) return;
+    if (dmThreadId && !userCanAccessDm(userId, dmThreadId)) return;
     const room = channelId ? `channel:${channelId}` : `dm:${dmThreadId}`;
     socket.to(room).emit('typing:update', {
       userId,
@@ -569,6 +614,7 @@ io.on('connection', (socket) => {
 
   // Voice room presence & WebRTC signaling relay
   socket.on('voice:join', (channelId) => {
+    if (!userCanAccessChannel(userId, channelId)) return;
     // Leave any previous voice room first
     for (const [prevChId, prevRoom] of voiceRooms.entries()) {
       if (prevChId !== channelId && prevRoom.has(socket.id)) {
