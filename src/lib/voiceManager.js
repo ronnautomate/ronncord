@@ -60,14 +60,20 @@ function tuneOpusSdp(sdp) {
 }
 
 /**
- * Adds video bitrate hints to SDP so 1080p60 starts crisp immediately without blurry ramp-up
+ * Adds video bitrate hints and prefers VP9 (avoids Windows H.264 green-tint artifacts)
  */
 function tuneVideoSdp(sdp) {
   if (!sdp) return sdp;
-  return sdp.replace(
-    /(m=video[^\r\n]*\r\n)/g,
-    '$1b=AS:6000\r\n'
-  );
+  let out = sdp.replace(/(m=video[^\r\n]*\r\n)/g, '$1b=AS:6000\r\n');
+  const vp9Match = out.match(/a=rtpmap:(\d+)\s+VP9\/90000/i);
+  if (vp9Match) {
+    const vp9Pt = vp9Match[1];
+    out = out.replace(/^(m=video \d+ [^\s]+ )(.+)$/m, (_full, prefix, pts) => {
+      const list = pts.split(' ').filter(p => p !== vp9Pt);
+      return `${prefix}${vp9Pt} ${list.join(' ')}`;
+    });
+  }
+  return out;
 }
 
 /**
@@ -357,8 +363,7 @@ export class VoiceManager {
       video: {
         width: { ideal: 1920 },
         height: { ideal: 1080 },
-        frameRate: { ideal: 60 },
-        cursor: 'always'
+        frameRate: { ideal: 60 }
       },
       audio: {
         suppressLocalAudioPlayback: false,

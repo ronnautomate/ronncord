@@ -1009,13 +1009,6 @@ function App() {
                   }}
                 />
                 <div className="screen-label">Sua Tela • 1080p 60fps AO VIVO</div>
-                <button
-                  className="screen-fullscreen-btn"
-                  title="Tela Cheia"
-                  onClick={e => e.currentTarget.parentElement?.querySelector('video')?.requestFullscreen?.()}
-                >
-                  <Maximize2 size={14} />
-                </button>
               </div>
             )}
             {remoteVideos.map(v => (
