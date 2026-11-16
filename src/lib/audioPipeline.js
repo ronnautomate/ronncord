@@ -184,9 +184,11 @@ export async function createProcessedMicPipeline(options = {}) {
 
   const timeDomain = new Float32Array(analyser.fftSize);
   let rafId = null;
+  let lastSpeakTime = 0;
 
   function startMeter(onLevel) {
-    const vadThreshold = Math.max(-44, settings.gateThresholdDb - 2);
+    const openDb = Math.max(-52, settings.gateThresholdDb + 2);
+    const releaseHoldMs = 220;
     function tick() {
       analyser.getFloatTimeDomainData(timeDomain);
       let sum = 0;
@@ -196,7 +198,11 @@ export async function createProcessedMicPipeline(options = {}) {
       const rms = Math.sqrt(sum / timeDomain.length);
       const db = rms > 0 ? 20 * Math.log10(rms) : -100;
       const normalized = Math.max(0, Math.min(1, (db + 65) / 55));
-      const speaking = db > vadThreshold;
+      const now = performance.now();
+      if (db > openDb) {
+        lastSpeakTime = now;
+      }
+      const speaking = now - lastSpeakTime < releaseHoldMs;
       onLevel({ db, normalized, speaking });
       rafId = requestAnimationFrame(tick);
     }
