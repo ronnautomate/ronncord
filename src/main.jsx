@@ -6,7 +6,7 @@ import {
   MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2
 } from 'lucide-react';
 import { apiFetch, connectSocket, getToken, setToken, resolveAssetUrl } from './lib/api.js';
-import { VoiceManager } from './lib/voiceManager.js';
+import { VoiceManager, getSavedUserVolumes } from './lib/voiceManager.js';
 import { getSavedVoiceSettings } from './lib/audioPipeline.js';
 import { SoundFX } from './lib/soundEffects.js';
 import { AuthScreen } from './components/AuthScreen.jsx';
@@ -113,8 +113,10 @@ function App() {
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
 
-  const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile' | 'voice-settings'
+  const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile' | 'voice-settings' | 'new-dm'
   const [selectedProfile, setSelectedProfile] = useState(null);
+  const [volumeTarget, setVolumeTarget] = useState(null);
+  const [userVolumes, setUserVolumes] = useState(getSavedUserVolumes);
   const socketRef = useRef(null);
   const voiceManagerRef = useRef(null);
   const voiceChannelIdRef = useRef(null);
@@ -712,7 +714,16 @@ function App() {
                       {participants.length > 0 && (
                         <div className="voice-participants">
                           {participants.map(p => (
-                            <div key={p.socketId} className={`voice-user ${p.speaking ? 'speaking' : ''}`}>
+                            <div
+                              key={p.socketId}
+                              className={`voice-user clickable ${p.speaking ? 'speaking' : ''}`}
+                              title={p.userId !== user.id ? 'Clique para ajustar o volume (0% - 200%)' : p.displayName}
+                              onClick={() => {
+                                if (p.userId !== user.id) {
+                                  setVolumeTarget(prev => (prev?.userId === p.userId ? null : p));
+                                }
+                              }}
+                            >
                               <span
                                 className={`avatar xs ${p.speaking ? 'speaking-ring' : ''}`}
                                 style={{ background: p.avatarColor }}
@@ -720,6 +731,9 @@ function App() {
                                 {p.displayName[0]}
                               </span>
                               <span className="voice-user-name">{p.displayName}</span>
+                              {p.userId !== user.id && (userVolumes[p.userId] ?? 100) !== 100 && (
+                                <small className="vol-tag">{userVolumes[p.userId]}%</small>
+                              )}
                               {p.muted && <MicOff size={12} className="voice-badge-muted" />}
                               {p.cameraOn && <Video size={12} style={{ color: '#57F287' }} />}
                               {p.screenSharing && <span className="live-badge">AO VIVO</span>}
@@ -770,6 +784,52 @@ function App() {
               </div>
             </div>
           </>
+        )}
+
+        {volumeTarget && (
+          <div className="user-volume-popover">
+            <div className="user-volume-header">
+              <strong>Volume de {volumeTarget.displayName}</strong>
+              <span>{userVolumes[volumeTarget.userId] ?? 100}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={200}
+              step={5}
+              value={userVolumes[volumeTarget.userId] ?? 100}
+              onChange={e => {
+                const val = Number(e.target.value);
+                voiceManagerRef.current?.setUserVolume(volumeTarget.userId, val);
+                setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: val }));
+              }}
+            />
+            <div className="user-volume-actions">
+              <button
+                type="button"
+                className="btn-ghost xs"
+                onClick={() => {
+                  voiceManagerRef.current?.setUserVolume(volumeTarget.userId, 0);
+                  setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 0 }));
+                }}
+              >
+                Mutar (0%)
+              </button>
+              <button
+                type="button"
+                className="btn-ghost xs"
+                onClick={() => {
+                  voiceManagerRef.current?.setUserVolume(volumeTarget.userId, 100);
+                  setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 100 }));
+                }}
+              >
+                100%
+              </button>
+              <button type="button" className="btn-primary xs" onClick={() => setVolumeTarget(null)}>
+                OK
+              </button>
+            </div>
+          </div>
         )}
 
         {voiceChannelId && (

@@ -2090,3 +2090,54 @@ body {
   opacity: 0.55;
   border: none !important;
 }
+
+/* Per-User Volume Slider Popover */
+.voice-user.clickable {
+  padding: 3px 6px;
+  border-radius: 5px;
+}
+
+.voice-user.clickable:hover {
+  background: var(--bg-hover);
+}
+
+.vol-tag {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-rail);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.user-volume-popover {
+  background: var(--bg-rail);
+  border-top: 1px solid #35373c;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.user-volume-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.user-volume-header span {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.user-volume-popover input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.user-volume-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}

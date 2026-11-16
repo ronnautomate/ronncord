@@ -89,6 +89,21 @@ async function tuneVideoSender(sender) {
   }
 }
 
+export function getSavedUserVolumes() {
+  try {
+    return JSON.parse(localStorage.getItem('ronncord_user_volumes') || '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function saveUserVolume(userId, percent) {
+  const map = getSavedUserVolumes();
+  map[userId] = Math.max(0, Math.min(200, Number(percent)));
+  localStorage.setItem('ronncord_user_volumes', JSON.stringify(map));
+  return map[userId];
+}
+
 export class VoiceManager {
   constructor(socket, callbacks = {}) {
     this.socket = socket;
@@ -97,7 +112,8 @@ export class VoiceManager {
     this.pipeline = null;
     this.cameraStream = null;
     this.screenStream = null;
-    this.peers = new Map(); // socketId -> { pc, audioEl, displayName }
+    this.playbackCtx = null;
+    this.peers = new Map(); // socketId -> { pc, audioEls, gainNodes, userId, displayName, pendingCandidates }
     this.remoteVideos = new Map(); // `${socketId}:${trackId}` -> { id, socketId, trackId, kind, displayName, stream }
     this.trackMetaMap = new Map(); // trackId -> 'camera' | 'screen'
     this.muted = false;
@@ -202,14 +218,34 @@ export class VoiceManager {
 
   setDeafened(deafened) {
     this.deafened = deafened;
-    for (const { audioEls } of this.peers.values()) {
-      for (const audioEl of audioEls.values()) {
-        audioEl.muted = deafened;
+    const vols = getSavedUserVolumes();
+    for (const peer of this.peers.values()) {
+      const targetGain = deafened ? 0 : ((vols[peer.userId] ?? 100) / 100);
+      if (peer.gainNodes) {
+        for (const gain of peer.gainNodes.values()) {
+          gain.gain.value = targetGain;
+        }
+      }
+      for (const audioEl of peer.audioEls.values()) {
+        audioEl.muted = true; // audio plays via GainNode for 0-200% boost
       }
     }
     if (this.channelId) {
       this.socket?.emit('voice:state', { channelId: this.channelId, deafened });
     }
+  }
+
+  setUserVolume(userId, percent) {
+    const clamped = saveUserVolume(userId, percent);
+    if (this.deafened) return clamped;
+    for (const peer of this.peers.values()) {
+      if (peer.userId === userId && peer.gainNodes) {
+        for (const gain of peer.gainNodes.values()) {
+          gain.gain.value = clamped / 100;
+        }
+      }
+    }
+    return clamped;
   }
 
   async _attachVideoStreamToPeers(stream, streamKind) {
@@ -353,7 +389,7 @@ export class VoiceManager {
     if (channelId !== this.channelId) return;
     for (const peer of peers) {
       if (peer.socketId === this.socket.id) continue;
-      const pc = await this._createPeerConnection(peer.socketId, peer.displayName);
+      const pc = await this._createPeerConnection(peer.socketId, peer.displayName, peer.userId);
       const offer = await pc.createOffer();
       offer.sdp = tuneOpusSdp(offer.sdp);
       await pc.setLocalDescription(offer);
@@ -384,7 +420,7 @@ export class VoiceManager {
 
     let peerObj = this.peers.get(fromSocketId);
     if (!peerObj) {
-      await this._createPeerConnection(fromSocketId, user?.display_name || 'Usuário');
+      await this._createPeerConnection(fromSocketId, user?.display_name || 'Usuário', user?.id || fromSocketId);
       peerObj = this.peers.get(fromSocketId);
     }
     const { pc, pendingCandidates } = peerObj;
@@ -440,7 +476,7 @@ export class VoiceManager {
     }
   }
 
-  async _createPeerConnection(targetSocketId, displayName) {
+  async _createPeerConnection(targetSocketId, displayName, userId = targetSocketId) {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
     if (this.pipeline?.stream) {
@@ -499,6 +535,7 @@ export class VoiceManager {
     })();
 
     const audioEls = new Map();
+    const gainNodes = new Map();
 
     pc.oniceconnectionstatechange = () => {
       if (pc.iceConnectionState === 'failed') {
@@ -522,17 +559,35 @@ export class VoiceManager {
       }
 
       if (event.track.kind === 'audio') {
+        const trackStream = new MediaStream([event.track]);
         const audioEl = document.createElement('audio');
         audioEl.autoplay = true;
         audioEl.playsInline = true;
-        audioEl.muted = this.deafened;
-        audioEl.volume = 1.0;
-        audioEl.srcObject = new MediaStream([event.track]);
+        // Keep element muted so WebAudio GainNode handles 0-200% boost without echo
+        audioEl.muted = true;
+        audioEl.srcObject = trackStream;
         audioPool.appendChild(audioEl);
         audioEls.set(event.track.id, audioEl);
 
+        if (!this.playbackCtx) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          this.playbackCtx = new Ctx({ latencyHint: 'interactive' });
+        }
+        if (this.playbackCtx.state === 'suspended') {
+          this.playbackCtx.resume().catch(() => {});
+        }
+
+        const srcNode = this.playbackCtx.createMediaStreamSource(trackStream);
+        const gainNode = this.playbackCtx.createGain();
+        const savedVol = getSavedUserVolumes()[userId] ?? 100;
+        gainNode.gain.value = this.deafened ? 0 : (savedVol / 100);
+        srcNode.connect(gainNode);
+        gainNode.connect(this.playbackCtx.destination);
+        gainNodes.set(event.track.id, gainNode);
+
         audioEl.play().catch(() => {
           const unlock = () => {
+            this.playbackCtx?.resume().catch(() => {});
             audioEl.play().catch(() => {});
             window.removeEventListener('pointerdown', unlock);
           };
@@ -540,6 +595,8 @@ export class VoiceManager {
         });
 
         event.track.onended = () => {
+          try { srcNode.disconnect(); gainNode.disconnect(); } catch {}
+          gainNodes.delete(event.track.id);
           audioEl.srcObject = null;
           audioEl.remove();
           audioEls.delete(event.track.id);
@@ -564,7 +621,7 @@ export class VoiceManager {
       }
     };
 
-    this.peers.set(targetSocketId, { pc, audioEls, displayName, pendingCandidates: [] });
+    this.peers.set(targetSocketId, { pc, audioEls, gainNodes, userId, displayName, pendingCandidates: [] });
     return pc;
   }
 
