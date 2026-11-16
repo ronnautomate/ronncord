@@ -824,8 +824,8 @@ function App() {
             <input
               type="range"
               min={0}
-              max={200}
-              step={5}
+              max={400}
+              step={10}
               value={userVolumes[volumeTarget.userId] ?? 100}
               onChange={e => {
                 const val = Number(e.target.value);
@@ -842,7 +842,7 @@ function App() {
                   setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 0 }));
                 }}
               >
-                Mutar (0%)
+                0%
               </button>
               <button
                 type="button"
@@ -853,6 +853,26 @@ function App() {
                 }}
               >
                 100%
+              </button>
+              <button
+                type="button"
+                className="btn-ghost xs"
+                onClick={() => {
+                  voiceManagerRef.current?.setUserVolume(volumeTarget.userId, 250);
+                  setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 250 }));
+                }}
+              >
+                250%
+              </button>
+              <button
+                type="button"
+                className="btn-ghost xs"
+                onClick={() => {
+                  voiceManagerRef.current?.setUserVolume(volumeTarget.userId, 400);
+                  setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 400 }));
+                }}
+              >
+                400%
               </button>
               <button type="button" className="btn-primary xs" onClick={() => setVolumeTarget(null)}>
                 OK

@@ -66,7 +66,7 @@ function tuneVideoSdp(sdp) {
   if (!sdp) return sdp;
   return sdp.replace(
     /(m=video[^\r\n]*\r\n)/g,
-    '$1b=AS:10000\r\n'
+    '$1b=AS:6000\r\n'
   );
 }
 
@@ -80,7 +80,7 @@ async function tuneVideoSender(sender) {
     if (!params.encodings || params.encodings.length === 0) {
       params.encodings = [{}];
     }
-    params.encodings[0].maxBitrate = 8_000_000; // 8 Mbps for crisp 1080p60
+    params.encodings[0].maxBitrate = 6_000_000; // 6 Mbps for crisp, artifact-free 1080p60
     params.encodings[0].maxFramerate = 60;
     params.degradationPreference = 'maintain-framerate';
     await sender.setParameters(params);
@@ -99,7 +99,7 @@ export function getSavedUserVolumes() {
 
 export function saveUserVolume(userId, percent) {
   const map = getSavedUserVolumes();
-  map[userId] = Math.max(0, Math.min(200, Number(percent)));
+  map[userId] = Math.max(0, Math.min(400, Number(percent)));
   localStorage.setItem('ronncord_user_volumes', JSON.stringify(map));
   return map[userId];
 }
@@ -362,7 +362,7 @@ export class VoiceManager {
       },
       audio: {
         suppressLocalAudioPlayback: false,
-        echoCancellation: false,
+        echoCancellation: true,
         noiseSuppression: false,
         autoGainControl: false
       }

@@ -2141,3 +2141,13 @@ body {
   align-items: center;
   gap: 6px;
 }
+
+/* Fullscreen Video Fix (prevents 36vh crop & green scaling artifacts) */
+.screen-tile video:fullscreen,
+.screen-tile video:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  background: #000;
+  object-fit: contain;
+}
