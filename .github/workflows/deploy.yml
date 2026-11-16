@@ -47,5 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - name: Wait for legacy pages build to finish first
+        run: sleep 45
+
       - name: Deploy website
         uses: actions/deploy-pages@v4
