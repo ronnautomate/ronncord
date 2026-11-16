@@ -16,6 +16,18 @@ import noiseGateWorkletUrl from '@sapphi-red/web-noise-suppressor/noiseGateWorkl
 let cachedGtcrnWasm = null;
 let cachedRnnoiseWasm = null;
 
+async function addWorkletModuleSafe(ctx, url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} loading worklet`);
+  const code = await res.text();
+  const blobUrl = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+  try {
+    await ctx.audioWorklet.addModule(blobUrl);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
 async function getGtcrnBinary() {
   if (!cachedGtcrnWasm) {
     cachedGtcrnWasm = await loadGtcrn({ url: gtcrnWasmUrl });
@@ -96,31 +108,39 @@ export async function createProcessedMicPipeline(options = {}) {
   let gateNode = null;
 
   // 2. Neural AI Noise Suppression (GTCRN or RNNoise SIMD)
-  if (settings.noiseMode === 'gtcrn') {
-    await ctx.audioWorklet.addModule(gtcrnWorkletUrl);
-    const wasmBinary = await getGtcrnBinary();
-    aiNode = new GtcrnWorkletNode(ctx, { maxChannels: 1, wasmBinary });
-    currentNode.connect(aiNode);
-    currentNode = aiNode;
-  } else if (settings.noiseMode === 'rnnoise') {
-    await ctx.audioWorklet.addModule(rnnoiseWorkletUrl);
-    const wasmBinary = await getRnnoiseBinary();
-    aiNode = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary });
-    currentNode.connect(aiNode);
-    currentNode = aiNode;
+  try {
+    if (settings.noiseMode === 'gtcrn') {
+      await addWorkletModuleSafe(ctx, gtcrnWorkletUrl);
+      const wasmBinary = await getGtcrnBinary();
+      aiNode = new GtcrnWorkletNode(ctx, { maxChannels: 1, wasmBinary });
+      currentNode.connect(aiNode);
+      currentNode = aiNode;
+    } else if (settings.noiseMode === 'rnnoise') {
+      await addWorkletModuleSafe(ctx, rnnoiseWorkletUrl);
+      const wasmBinary = await getRnnoiseBinary();
+      aiNode = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary });
+      currentNode.connect(aiNode);
+      currentNode = aiNode;
+    }
+  } catch (err) {
+    console.warn('[RONNCORD] Neural AI worklet fallback:', err);
   }
 
   // 3. Smart Noise Gate
   if (settings.gateThresholdDb > -70) {
-    await ctx.audioWorklet.addModule(noiseGateWorkletUrl);
-    gateNode = new NoiseGateWorkletNode(ctx, {
-      openThreshold: settings.gateThresholdDb,
-      closeThreshold: settings.gateThresholdDb - 4,
-      holdMs: 180,
-      maxChannels: 1
-    });
-    currentNode.connect(gateNode);
-    currentNode = gateNode;
+    try {
+      await addWorkletModuleSafe(ctx, noiseGateWorkletUrl);
+      gateNode = new NoiseGateWorkletNode(ctx, {
+        openThreshold: settings.gateThresholdDb,
+        closeThreshold: settings.gateThresholdDb - 4,
+        holdMs: 180,
+        maxChannels: 1
+      });
+      currentNode.connect(gateNode);
+      currentNode = gateNode;
+    } catch (err) {
+      console.warn('[RONNCORD] NoiseGate worklet fallback:', err);
+    }
   }
 
   // 4. Broadcast Voice Compressor (prevents clipping, keeps quiet voice clear)
