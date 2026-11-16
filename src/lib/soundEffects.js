@@ -20,108 +20,127 @@ export function setSoundsEnabled(enabled) {
   localStorage.setItem('ronncord_sounds', enabled ? 'on' : 'off');
 }
 
-function playToneSequence(notes, type = 'sine', volume = 0.14) {
+function playChime(notes, { type = 'sine', volume = 0.16, filterFreq = 2600 } = {}) {
   if (!isSoundsEnabled()) return;
   const ctx = getCtx();
   if (!ctx) return;
 
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = filterFreq;
+  filter.connect(ctx.destination);
+
   let offset = ctx.currentTime;
-  for (const { freq, dur, gap = 0.015, slideTo } of notes) {
+  for (const { freq, dur, gap = 0.018, slideTo } of notes) {
     const osc = ctx.createOscillator();
+    const oscHarm = ctx.createOscillator();
     const gain = ctx.createGain();
+
     osc.type = type;
+    oscHarm.type = 'triangle';
     osc.frequency.setValueAtTime(freq, offset);
+    oscHarm.frequency.setValueAtTime(freq * 2, offset);
+
     if (slideTo) {
       osc.frequency.exponentialRampToValueAtTime(slideTo, offset + dur);
+      oscHarm.frequency.exponentialRampToValueAtTime(slideTo * 2, offset + dur);
     }
 
-    gain.gain.setValueAtTime(0.001, offset);
-    gain.gain.linearRampToValueAtTime(volume, offset + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.001, offset + dur);
+    const harmGain = ctx.createGain();
+    harmGain.gain.value = 0.18;
+
+    gain.gain.setValueAtTime(0.0001, offset);
+    gain.gain.linearRampToValueAtTime(volume, offset + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, offset + dur);
 
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    oscHarm.connect(harmGain);
+    harmGain.connect(gain);
+    gain.connect(filter);
+
     osc.start(offset);
-    osc.stop(offset + dur + 0.01);
+    oscHarm.start(offset);
+    osc.stop(offset + dur + 0.015);
+    oscHarm.stop(offset + dur + 0.015);
     offset += dur + gap;
   }
 }
 
 export const SoundFX = {
-  // Entrou na call (acorde ascendente estilo Discord)
+  // Entrou na call (G4 -> D5)
   joinVoice() {
-    playToneSequence([
-      { freq: 440, dur: 0.08, gap: 0.02 },
-      { freq: 587.33, dur: 0.12, gap: 0 }
-    ], 'triangle', 0.16);
+    playChime([
+      { freq: 392.0, dur: 0.09, gap: 0.015 },
+      { freq: 587.33, dur: 0.14, gap: 0 }
+    ], { type: 'sine', volume: 0.18, filterFreq: 2400 });
   },
-  // Saiu da call (acorde descendente)
+  // Saiu da call (D5 -> G4)
   leaveVoice() {
-    playToneSequence([
-      { freq: 523.25, dur: 0.08, gap: 0.02 },
-      { freq: 349.23, dur: 0.14, gap: 0 }
-    ], 'triangle', 0.16);
+    playChime([
+      { freq: 587.33, dur: 0.085, gap: 0.015 },
+      { freq: 392.0, dur: 0.15, gap: 0 }
+    ], { type: 'sine', volume: 0.18, filterFreq: 2200 });
   },
-  // Outro amigo entrou na call
+  // Outro usuário entrou na call (B4 -> E5)
   userJoined() {
-    playToneSequence([
-      { freq: 520, dur: 0.06, gap: 0.015 },
-      { freq: 680, dur: 0.09, gap: 0 }
-    ], 'sine', 0.11);
+    playChime([
+      { freq: 493.88, dur: 0.065, gap: 0.012 },
+      { freq: 659.25, dur: 0.10, gap: 0 }
+    ], { type: 'sine', volume: 0.13, filterFreq: 2600 });
   },
-  // Outro amigo saiu da call
+  // Outro usuário saiu da call (E5 -> B4)
   userLeft() {
-    playToneSequence([
-      { freq: 480, dur: 0.06, gap: 0.015 },
-      { freq: 340, dur: 0.09, gap: 0 }
-    ], 'sine', 0.11);
+    playChime([
+      { freq: 659.25, dur: 0.065, gap: 0.012 },
+      { freq: 493.88, dur: 0.10, gap: 0 }
+    ], { type: 'sine', volume: 0.13, filterFreq: 2200 });
   },
   // Mutar microfone
   mute() {
-    playToneSequence([
-      { freq: 380, dur: 0.055, slideTo: 240 }
-    ], 'sine', 0.14);
+    playChime([
+      { freq: 420, dur: 0.06, slideTo: 210 }
+    ], { type: 'sine', volume: 0.16, filterFreq: 1800 });
   },
   // Desmutar microfone
   unmute() {
-    playToneSequence([
-      { freq: 320, dur: 0.055, slideTo: 520 }
-    ], 'sine', 0.14);
+    playChime([
+      { freq: 260, dur: 0.06, slideTo: 520 }
+    ], { type: 'sine', volume: 0.16, filterFreq: 2400 });
   },
   // Ensurdecer (deafen)
   deafen() {
-    playToneSequence([
-      { freq: 440, dur: 0.05, gap: 0.02 },
-      { freq: 293.66, dur: 0.09, gap: 0 }
-    ], 'triangle', 0.14);
+    playChime([
+      { freq: 440.0, dur: 0.055, gap: 0.015 },
+      { freq: 277.18, dur: 0.10, gap: 0 }
+    ], { type: 'triangle', volume: 0.15, filterFreq: 1900 });
   },
   // Reativar áudio (undeafen)
   undeafen() {
-    playToneSequence([
-      { freq: 329.63, dur: 0.05, gap: 0.02 },
-      { freq: 523.25, dur: 0.09, gap: 0 }
-    ], 'triangle', 0.14);
+    playChime([
+      { freq: 329.63, dur: 0.055, gap: 0.015 },
+      { freq: 554.37, dur: 0.10, gap: 0 }
+    ], { type: 'triangle', volume: 0.15, filterFreq: 2500 });
   },
   // Iniciar stream / câmera
   streamStart() {
-    playToneSequence([
-      { freq: 493.88, dur: 0.06, gap: 0.02 },
-      { freq: 659.25, dur: 0.06, gap: 0.02 },
-      { freq: 783.99, dur: 0.11, gap: 0 }
-    ], 'sine', 0.12);
+    playChime([
+      { freq: 440.0, dur: 0.06, gap: 0.012 },
+      { freq: 554.37, dur: 0.06, gap: 0.012 },
+      { freq: 659.25, dur: 0.12, gap: 0 }
+    ], { type: 'sine', volume: 0.14, filterFreq: 2800 });
   },
   // Parar stream / câmera
   streamStop() {
-    playToneSequence([
-      { freq: 659.25, dur: 0.06, gap: 0.02 },
-      { freq: 440, dur: 0.1, gap: 0 }
-    ], 'sine', 0.12);
+    playChime([
+      { freq: 659.25, dur: 0.06, gap: 0.012 },
+      { freq: 440.0, dur: 0.11, gap: 0 }
+    ], { type: 'sine', volume: 0.14, filterFreq: 2200 });
   },
   // Nova mensagem recebida
   message() {
-    playToneSequence([
-      { freq: 660, dur: 0.045, gap: 0.01 },
-      { freq: 880, dur: 0.065, gap: 0 }
-    ], 'sine', 0.08);
+    playChime([
+      { freq: 523.25, dur: 0.045, gap: 0.01 },
+      { freq: 783.99, dur: 0.075, gap: 0 }
+    ], { type: 'sine', volume: 0.09, filterFreq: 2600 });
   }
 };
