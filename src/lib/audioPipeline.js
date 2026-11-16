@@ -50,8 +50,8 @@ export function getSavedVoiceSettings() {
     // ignore
   }
   return {
-    noiseMode: 'hybrid', // 'hybrid' (RNNoise + GTCRN) | 'gtcrn' | 'rnnoise' | 'off'
-    gateThresholdDb: -54,
+    noiseMode: 'rnnoise', // 'rnnoise' (SIMD ultra-leve) | 'gtcrn' | 'hybrid' | 'off'
+    gateThresholdDb: -56,
     inputDeviceId: 'default',
     outputDeviceId: 'default'
   };
@@ -147,8 +147,8 @@ export async function createProcessedMicPipeline(options = {}) {
       await addWorkletModuleSafe(ctx, noiseGateWorkletUrl);
       gateNode = new NoiseGateWorkletNode(ctx, {
         openThreshold: settings.gateThresholdDb,
-        closeThreshold: settings.gateThresholdDb - 5,
-        holdMs: 110,
+        closeThreshold: settings.gateThresholdDb - 6,
+        holdMs: 280,
         maxChannels: 1
       });
       currentNode.connect(gateNode);

@@ -72,12 +72,12 @@ export function VoiceSettingsModal({ onClose, onApplySettings }) {
             <div className="noise-modes-grid">
               <button
                 type="button"
-                className={`noise-mode-card ${settings.noiseMode === 'hybrid' ? 'selected' : ''}`}
-                onClick={() => setSettings(s => ({ ...s, noiseMode: 'hybrid' }))}
+                className={`noise-mode-card ${settings.noiseMode === 'rnnoise' ? 'selected' : ''}`}
+                onClick={() => setSettings(s => ({ ...s, noiseMode: 'rnnoise' }))}
               >
-                <div className="noise-badge">MÁXIMO • ANTI-TECLADO</div>
-                <strong>RONNCORD AI Max (RNNoise + GTCRN Duplo)</strong>
-                <small>Cascata dupla de IA + corte de frequência vocal (110Hz–7.5kHz) + AGC desligado. Elimina teclado mecânico e barulho externo.</small>
+                <div className="noise-badge">RECOMENDADO • FLUIDO</div>
+                <strong>RNNoise Neural (SIMD)</strong>
+                <small>Rede neural ultraleve com aceleração SIMD. Voz lisa, zero travamentos e ótima remoção de teclado/ruído.</small>
               </button>
 
               <button
@@ -86,16 +86,16 @@ export function VoiceSettingsModal({ onClose, onApplySettings }) {
                 onClick={() => setSettings(s => ({ ...s, noiseMode: 'gtcrn' }))}
               >
                 <strong>RONNCORD AI Ultra (GTCRN)</strong>
-                <small>Rede neural profunda única com menor uso de CPU.</small>
+                <small>Rede neural profunda (exige mais CPU; use se o seu PC for forte).</small>
               </button>
 
               <button
                 type="button"
-                className={`noise-mode-card ${settings.noiseMode === 'rnnoise' ? 'selected' : ''}`}
-                onClick={() => setSettings(s => ({ ...s, noiseMode: 'rnnoise' }))}
+                className={`noise-mode-card ${settings.noiseMode === 'hybrid' ? 'selected' : ''}`}
+                onClick={() => setSettings(s => ({ ...s, noiseMode: 'hybrid' }))}
               >
-                <strong>RNNoise Neural (SIMD)</strong>
-                <small>Rede neural ultraleve com aceleração SIMD.</small>
+                <strong>AI Max Duplo (RNNoise + GTCRN)</strong>
+                <small>Máxima filtragem em cascata (pode picotar em CPUs mais simples).</small>
               </button>
 
               <button

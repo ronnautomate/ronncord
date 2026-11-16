@@ -37,7 +37,7 @@ function tuneOpusSdp(sdp) {
     if (line.startsWith(fmtpPrefix)) {
       foundFmtp = true;
       let params = line.slice(fmtpPrefix.length);
-      const extras = ['minptime=10', 'ptime=10', 'useinbandfec=1', 'usedtx=0', 'maxaveragebitrate=96000', 'stereo=0'];
+      const extras = ['minptime=10', 'useinbandfec=1', 'usedtx=0', 'maxaveragebitrate=64000', 'stereo=0'];
       for (const kv of extras) {
         const key = kv.split('=')[0];
         if (!params.includes(`${key}=`)) {
@@ -52,7 +52,7 @@ function tuneOpusSdp(sdp) {
   if (!foundFmtp) {
     const idx = tuned.findIndex(l => l.startsWith(`a=rtpmap:${opusPayload}`));
     if (idx !== -1) {
-      tuned.splice(idx + 1, 0, `${fmtpPrefix}minptime=10;ptime=10;useinbandfec=1;usedtx=0;maxaveragebitrate=96000`);
+      tuned.splice(idx + 1, 0, `${fmtpPrefix}minptime=10;useinbandfec=1;usedtx=0;maxaveragebitrate=64000`);
     }
   }
 
