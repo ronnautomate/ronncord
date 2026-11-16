@@ -2216,3 +2216,27 @@ body {
 .screen-tile:hover .screen-tile-controls .screen-fullscreen-btn {
   opacity: 1;
 }
+
+.live-badge.clickable {
+  border: none;
+  cursor: pointer;
+}
+
+.live-badge.clickable:hover {
+  filter: brightness(1.15);
+}
+
+.screen-audio-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  padding: 2px 8px 2px 2px;
+  border-radius: 6px;
+}
+
+.screen-vol-slider {
+  width: 72px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}

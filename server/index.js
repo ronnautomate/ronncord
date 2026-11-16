@@ -843,8 +843,11 @@ io.on('connection', (socket) => {
   });
 
   // Voice room presence & WebRTC signaling relay
-  socket.on('voice:join', (channelId) => {
-    if (!userCanAccessChannel(userId, channelId)) return;
+  socket.on('voice:join', (payload) => {
+    const channelId = typeof payload === 'string' ? payload : payload?.channelId;
+    const initMuted = typeof payload === 'object' ? Boolean(payload?.muted) : false;
+    const initDeafened = typeof payload === 'object' ? Boolean(payload?.deafened) : false;
+    if (!channelId || !userCanAccessChannel(userId, channelId)) return;
     // Leave any previous voice room first
     for (const [prevChId, prevRoom] of voiceRooms.entries()) {
       if (prevChId !== channelId && prevRoom.has(socket.id)) {
@@ -865,8 +868,8 @@ io.on('connection', (socket) => {
       avatarColor: socket.user.avatar_color,
       avatarUrl: socket.user.avatar_url || null,
       avatarDecoration: socket.user.avatar_decoration || 'none',
-      muted: false,
-      deafened: false,
+      muted: initMuted,
+      deafened: initDeafened,
       speaking: false,
       cameraOn: false,
       screenSharing: false

@@ -53,7 +53,9 @@ export function getSavedVoiceSettings() {
     noiseMode: 'rnnoise', // 'rnnoise' (SIMD ultra-leve) | 'gtcrn' | 'hybrid' | 'off'
     gateThresholdDb: -56,
     inputDeviceId: 'default',
-    outputDeviceId: 'default'
+    outputDeviceId: 'default',
+    pttEnabled: false,
+    pttKey: 'Space'
   };
 }
 

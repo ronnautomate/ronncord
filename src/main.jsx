@@ -112,8 +112,10 @@ function App() {
   const [voiceSettings, setVoiceSettings] = useState(getSavedVoiceSettings);
 
   const [showMembers, setShowMembers] = useState(true);
-  const [muted, setMuted] = useState(false);
-  const [deafened, setDeafened] = useState(false);
+  const [muted, setMuted] = useState(() => localStorage.getItem('ronncord_muted') === '1');
+  const [deafened, setDeafened] = useState(() => localStorage.getItem('ronncord_deafened') === '1');
+  const [pttActive, setPttActive] = useState(false);
+  const [screenVolumes, setScreenVolumes] = useState({});
 
   const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile' | 'voice-settings' | 'new-dm'
   const [selectedProfile, setSelectedProfile] = useState(null);
@@ -555,12 +557,50 @@ function App() {
     setActiveDmId(thread.id);
   }
 
-  async function toggleVoiceChannel(ch) {
+  // Push-to-Talk (Pressionar para Falar)
+  useEffect(() => {
+    if (!voiceChannelId || !voiceSettings.pttEnabled) {
+      setPttActive(false);
+      return;
+    }
+    const targetKey = voiceSettings.pttKey || 'Space';
+    // Keep mic muted while PTT is active until key is pressed
+    voiceManagerRef.current?.setMuted(true);
+
+    const onKeyDown = e => {
+      if (e.code !== targetKey || e.repeat) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (targetKey === 'Space') e.preventDefault();
+      setPttActive(true);
+      if (!muted) voiceManagerRef.current?.setMuted(false);
+    };
+    const onKeyUp = e => {
+      if (e.code !== targetKey) return;
+      setPttActive(false);
+      voiceManagerRef.current?.setMuted(true);
+    };
+    const onBlur = () => {
+      setPttActive(false);
+      voiceManagerRef.current?.setMuted(true);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [voiceChannelId, voiceSettings.pttEnabled, voiceSettings.pttKey, muted]);
+
+  async function toggleVoiceChannel(ch, forceJoin = false) {
     if (isDemo) {
       alert('Salas de voz, câmera e tela 1080p60 WebRTC requerem o backend ativo (`npm run server`). Você já pode testar seu microfone no ícone de Configurações de Voz (Sliders)!');
       return;
     }
-    if (voiceChannelId === ch.id) {
+    if (voiceChannelId === ch.id && !forceJoin) {
       SoundFX.leaveVoice();
       voiceChannelIdRef.current = null;
       voiceCountRef.current = 0;
@@ -570,12 +610,14 @@ function App() {
       setIsScreenSharing(false);
       setLocalCameraStream(null);
       setLocalScreenStream(null);
-    } else {
+    } else if (voiceChannelId !== ch.id) {
       voiceChannelIdRef.current = ch.id;
       voiceCountRef.current = 0;
-      await voiceManagerRef.current?.join(ch.id, voiceSettings);
-      voiceManagerRef.current?.setMuted(muted);
-      voiceManagerRef.current?.setDeafened(deafened);
+      const effectiveMuted = voiceSettings.pttEnabled ? true : muted;
+      await voiceManagerRef.current?.join(ch.id, voiceSettings, {
+        muted: effectiveMuted,
+        deafened
+      });
       setVoiceChannelId(ch.id);
       SoundFX.joinVoice();
     }
@@ -624,7 +666,8 @@ function App() {
   function handleToggleMute() {
     const next = !muted;
     setMuted(next);
-    voiceManagerRef.current?.setMuted(next);
+    localStorage.setItem('ronncord_muted', next ? '1' : '0');
+    voiceManagerRef.current?.setMuted(next || (voiceSettings.pttEnabled && !pttActive));
     if (next) SoundFX.mute();
     else SoundFX.unmute();
   }
@@ -632,6 +675,7 @@ function App() {
   function handleToggleDeafen() {
     const next = !deafened;
     setDeafened(next);
+    localStorage.setItem('ronncord_deafened', next ? '1' : '0');
     voiceManagerRef.current?.setDeafened(next);
     if (next) SoundFX.deafen();
     else SoundFX.undeafen();
@@ -787,8 +831,24 @@ function App() {
                                 <small className="vol-tag">{userVolumes[p.userId]}%</small>
                               )}
                               {p.muted && <MicOff size={12} className="voice-badge-muted" />}
+                              {p.deafened && <HeadphoneOff size={12} className="voice-badge-muted" />}
                               {p.cameraOn && <Video size={12} style={{ color: '#57F287' }} />}
-                              {p.screenSharing && <span className="live-badge">AO VIVO</span>}
+                              {p.screenSharing && (
+                                <button
+                                  type="button"
+                                  className="live-badge clickable"
+                                  title="Assistir transmissão"
+                                  onClick={async e => {
+                                    e.stopPropagation();
+                                    setHiddenVideoIds([]);
+                                    if (voiceChannelId !== ch.id) {
+                                      await toggleVoiceChannel(ch, true);
+                                    }
+                                  }}
+                                >
+                                  AO VIVO
+                                </button>
+                              )}
                             </div>
                             );
                           })}
@@ -1067,6 +1127,7 @@ function App() {
             )}
             {remoteVideos.filter(v => !hiddenVideoIds.includes(v.id)).map(v => {
               const isScreenMuted = mutedScreenSockets.includes(v.socketId);
+              const scrVol = isScreenMuted ? 0 : (screenVolumes[v.socketId] ?? 100);
               return (
               <div key={v.id} className="screen-tile">
                 <video
@@ -1074,7 +1135,14 @@ function App() {
                   muted
                   playsInline
                   ref={el => {
-                    if (el && el.srcObject !== v.stream) el.srcObject = v.stream;
+                    if (!el) return;
+                    el.muted = true;
+                    el.volume = 0;
+                    const videoOnlyStream = new MediaStream(v.stream.getVideoTracks());
+                    if (el.srcObject?.id !== v.stream.id && (!el._srcTrackId || el._srcTrackId !== v.trackId)) {
+                      el._srcTrackId = v.trackId;
+                      el.srcObject = videoOnlyStream;
+                    }
                   }}
                 />
                 <div className="screen-label">
@@ -1082,20 +1150,41 @@ function App() {
                 </div>
                 <div className="screen-tile-controls">
                   {v.kind !== 'camera' && (
-                    <button
-                      className="screen-fullscreen-btn"
-                      style={{ position: 'static' }}
-                      title={isScreenMuted ? 'Ativar áudio da tela' : 'Mutar áudio da tela'}
-                      onClick={() => {
-                        const nextMuted = !isScreenMuted;
-                        voiceManagerRef.current?.setScreenAudioMuted(v.socketId, nextMuted);
-                        setMutedScreenSockets(prev =>
-                          nextMuted ? [...prev, v.socketId] : prev.filter(id => id !== v.socketId)
-                        );
-                      }}
-                    >
-                      {isScreenMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                    </button>
+                    <div className="screen-audio-ctrl">
+                      <button
+                        className="screen-fullscreen-btn"
+                        style={{ position: 'static' }}
+                        title={isScreenMuted ? 'Ativar áudio da tela' : 'Mutar áudio da tela'}
+                        onClick={() => {
+                          const nextMuted = !isScreenMuted;
+                          voiceManagerRef.current?.setScreenAudioMuted(v.socketId, nextMuted);
+                          setMutedScreenSockets(prev =>
+                            nextMuted ? [...prev, v.socketId] : prev.filter(id => id !== v.socketId)
+                          );
+                        }}
+                      >
+                        {isScreenMuted || scrVol === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                      </button>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={scrVol}
+                        title={`Volume da tela: ${scrVol}%`}
+                        className="screen-vol-slider"
+                        onChange={e => {
+                          const val = Number(e.target.value);
+                          voiceManagerRef.current?.setScreenAudioVolume(v.socketId, val);
+                          setScreenVolumes(prev => ({ ...prev, [v.socketId]: val }));
+                          if (val === 0 && !isScreenMuted) {
+                            setMutedScreenSockets(prev => [...prev, v.socketId]);
+                          } else if (val > 0 && isScreenMuted) {
+                            setMutedScreenSockets(prev => prev.filter(id => id !== v.socketId));
+                          }
+                        }}
+                      />
+                    </div>
                   )}
                   <button
                     className="screen-fullscreen-btn"

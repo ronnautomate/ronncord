@@ -149,11 +149,13 @@ export class VoiceManager {
     }
   }
 
-  async join(channelId, voiceSettings = {}) {
+  async join(channelId, voiceSettings = {}, initialState = {}) {
     if (this.channelId === channelId) return;
     await this.leave();
 
     this.channelId = channelId;
+    if (initialState.muted !== undefined) this.muted = Boolean(initialState.muted);
+    if (initialState.deafened !== undefined) this.deafened = Boolean(initialState.deafened);
     try {
       this.pipeline = await createProcessedMicPipeline(voiceSettings);
       this.pipeline.setMuted(this.muted);
@@ -170,7 +172,11 @@ export class VoiceManager {
       throw err;
     }
 
-    this.socket?.emit('voice:join', channelId);
+    this.socket?.emit('voice:join', {
+      channelId,
+      muted: this.muted,
+      deafened: this.deafened
+    });
     this.pingTimer = setInterval(() => this._measurePing(), 2000);
   }
 
@@ -244,6 +250,20 @@ export class VoiceManager {
         sEl.muted = shouldMute;
       }
     }
+  }
+
+  setScreenAudioVolume(socketId, percent) {
+    const clamped = Math.max(0, Math.min(100, Number(percent)));
+    if (clamped === 0) this.screenAudioMuted.add(socketId);
+    else this.screenAudioMuted.delete(socketId);
+    const peer = this.peers.get(socketId);
+    if (peer?.screenAudioEls) {
+      for (const sEl of peer.screenAudioEls.values()) {
+        sEl.muted = this.deafened || clamped === 0;
+        sEl.volume = clamped / 100;
+      }
+    }
+    return clamped;
   }
 
   setDeafened(deafened) {

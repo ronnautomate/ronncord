@@ -10,6 +10,7 @@ export function VoiceSettingsModal({ onClose, onApplySettings }) {
   const [settings, setSettings] = useState(getSavedVoiceSettings);
   const [devices, setDevices] = useState([]);
   const [testing, setTesting] = useState(false);
+  const [bindingKey, setBindingKey] = useState(false);
   const [level, setLevel] = useState({ db: -100, normalized: 0, speaking: false });
   const [error, setError] = useState('');
   const testPipelineRef = useRef(null);
@@ -122,6 +123,41 @@ export function VoiceSettingsModal({ onClose, onApplySettings }) {
                 </option>
               ))}
             </select>
+          </label>
+
+          <label>
+            <span>MODO DE ENTRADA (MICROFONE)</span>
+            <div className="deco-picker">
+              <button
+                type="button"
+                className={`deco-chip ${!settings.pttEnabled ? 'active' : ''}`}
+                onClick={() => setSettings(s => ({ ...s, pttEnabled: false }))}
+              >
+                Detecção de Voz (Automático)
+              </button>
+              <button
+                type="button"
+                className={`deco-chip ${settings.pttEnabled ? 'active' : ''}`}
+                onClick={() => setSettings(s => ({ ...s, pttEnabled: true }))}
+              >
+                Pressionar para Falar (Push-to-Talk)
+              </button>
+              {settings.pttEnabled && (
+                <button
+                  type="button"
+                  className="btn-primary xs"
+                  onKeyDown={e => {
+                    if (!bindingKey) return;
+                    e.preventDefault();
+                    setSettings(s => ({ ...s, pttKey: e.code }));
+                    setBindingKey(false);
+                  }}
+                  onClick={() => setBindingKey(true)}
+                >
+                  {bindingKey ? 'Aperte uma tecla...' : `Tecla: ${settings.pttKey || 'Space'}`}
+                </button>
+              )}
+            </div>
           </label>
 
           <label>
