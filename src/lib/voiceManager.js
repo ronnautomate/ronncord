@@ -60,11 +60,11 @@ function tuneOpusSdp(sdp) {
 }
 
 /**
- * Adds video bitrate hints and prefers VP9 (avoids Windows H.264 green-tint artifacts)
+ * Adds high-bitrate video hints (12 Mbps) and prefers VP9 (avoids Windows H.264 green-tint artifacts)
  */
 function tuneVideoSdp(sdp) {
   if (!sdp) return sdp;
-  let out = sdp.replace(/(m=video[^\r\n]*\r\n)/g, '$1b=AS:6000\r\n');
+  let out = sdp.replace(/(m=video[^\r\n]*\r\n)/g, '$1b=AS:12000\r\n');
   const vp9Match = out.match(/a=rtpmap:(\d+)\s+VP9\/90000/i);
   if (vp9Match) {
     const vp9Pt = vp9Match[1];
@@ -72,12 +72,21 @@ function tuneVideoSdp(sdp) {
       const list = pts.split(' ').filter(p => p !== vp9Pt);
       return `${prefix}${vp9Pt} ${list.join(' ')}`;
     });
+    const fmtpRegex = new RegExp(`a=fmtp:${vp9Pt} ([^\\r\\n]+)`, 'i');
+    if (fmtpRegex.test(out)) {
+      out = out.replace(fmtpRegex, `a=fmtp:${vp9Pt} $1;x-google-min-bitrate=3000;x-google-start-bitrate=6000;x-google-max-bitrate=12000`);
+    } else {
+      out = out.replace(
+        new RegExp(`(a=rtpmap:${vp9Pt} VP9\\/90000\\r\\n)`, 'i'),
+        `$1a=fmtp:${vp9Pt} x-google-min-bitrate=3000;x-google-start-bitrate=6000;x-google-max-bitrate=12000\r\n`
+      );
+    }
   }
   return out;
 }
 
 /**
- * Configures WebRTC video sender for smooth 1080p 60fps streaming (8 Mbps max bitrate)
+ * Configures WebRTC video sender for sharp 1080p 60fps streaming (12 Mbps max bitrate, no downscaling)
  */
 async function tuneVideoSender(sender) {
   if (!sender || typeof sender.getParameters !== 'function') return;
@@ -86,9 +95,10 @@ async function tuneVideoSender(sender) {
     if (!params.encodings || params.encodings.length === 0) {
       params.encodings = [{}];
     }
-    params.encodings[0].maxBitrate = 6_000_000; // 6 Mbps for crisp, artifact-free 1080p60
+    params.encodings[0].maxBitrate = 12_000_000; // 12 Mbps for razor-sharp 1080p60
     params.encodings[0].maxFramerate = 60;
-    params.degradationPreference = 'maintain-framerate';
+    params.encodings[0].scaleResolutionDownBy = 1.0;
+    params.degradationPreference = 'maintain-resolution';
     await sender.setParameters(params);
   } catch {
     // Some browsers ignore specific encoding fields
@@ -122,6 +132,7 @@ export class VoiceManager {
     this.peers = new Map(); // socketId -> { pc, audioEls, gainNodes, userId, displayName, pendingCandidates }
     this.remoteVideos = new Map(); // `${socketId}:${trackId}` -> { id, socketId, trackId, kind, displayName, stream }
     this.trackMetaMap = new Map(); // trackId -> 'camera' | 'screen'
+    this.screenAudioMuted = new Set(); // socketId set for muted screen-share audio
     this.muted = false;
     this.deafened = false;
     this.pingTimer = null;
@@ -222,6 +233,17 @@ export class VoiceManager {
     }
   }
 
+  setScreenAudioMuted(socketId, isMuted) {
+    if (isMuted) this.screenAudioMuted.add(socketId);
+    else this.screenAudioMuted.delete(socketId);
+    const peer = this.peers.get(socketId);
+    if (peer?.screenGainNodes) {
+      for (const gain of peer.screenGainNodes.values()) {
+        gain.gain.value = (this.deafened || isMuted) ? 0 : 1;
+      }
+    }
+  }
+
   setDeafened(deafened) {
     this.deafened = deafened;
     const vols = getSavedUserVolumes();
@@ -276,6 +298,11 @@ export class VoiceManager {
         videoSender = peer.pc.addTrack(videoTrack, stream);
       }
       if (audioTrack) {
+        this.socket?.emit('webrtc:signal', {
+          targetSocketId: sid,
+          channelId: this.channelId,
+          signal: { type: 'track-meta', trackId: audioTrack.id, streamKind: 'screen-audio' }
+        });
         peer.pc.addTrack(audioTrack, stream);
       }
       await this._renegotiatePeer(sid, peer.pc);
@@ -557,6 +584,7 @@ export class VoiceManager {
 
     const audioEls = new Map();
     const gainNodes = new Map();
+    const screenGainNodes = new Map();
 
     pc.oniceconnectionstatechange = () => {
       if (pc.iceConnectionState === 'failed') {
@@ -600,11 +628,17 @@ export class VoiceManager {
 
         const srcNode = this.playbackCtx.createMediaStreamSource(trackStream);
         const gainNode = this.playbackCtx.createGain();
-        const savedVol = getSavedUserVolumes()[userId] ?? 100;
-        gainNode.gain.value = this.deafened ? 0 : (savedVol / 100);
+        const isScreenAudio = this.trackMetaMap.get(event.track.id) === 'screen-audio';
+        if (isScreenAudio) {
+          gainNode.gain.value = (this.deafened || this.screenAudioMuted.has(targetSocketId)) ? 0 : 1;
+          screenGainNodes.set(event.track.id, gainNode);
+        } else {
+          const savedVol = getSavedUserVolumes()[userId] ?? 100;
+          gainNode.gain.value = this.deafened ? 0 : (savedVol / 100);
+          gainNodes.set(event.track.id, gainNode);
+        }
         srcNode.connect(gainNode);
         gainNode.connect(this.playbackCtx.destination);
-        gainNodes.set(event.track.id, gainNode);
 
         audioEl.play().catch(() => {
           const unlock = () => {
@@ -642,7 +676,7 @@ export class VoiceManager {
       }
     };
 
-    this.peers.set(targetSocketId, { pc, audioEls, gainNodes, userId, displayName, pendingCandidates: [] });
+    this.peers.set(targetSocketId, { pc, audioEls, gainNodes, screenGainNodes, userId, displayName, pendingCandidates: [] });
     return pc;
   }
 

@@ -2153,3 +2153,32 @@ body {
   background: #000;
   object-fit: contain;
 }
+
+/* Clean Screen Tile Controls (only visible on hover so video is 100% unobstructed) */
+.screen-tile .screen-label {
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.screen-tile:hover .screen-label {
+  opacity: 1;
+}
+
+.screen-tile-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.screen-tile:hover .screen-tile-controls {
+  opacity: 1;
+}
+
+.screen-tile:hover .screen-tile-controls .screen-fullscreen-btn {
+  opacity: 1;
+}

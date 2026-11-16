@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Hash, Volume2, Plus, Settings, Mic, MicOff, Headphones, HeadphoneOff,
+  Hash, Volume2, VolumeX, Plus, Settings, Mic, MicOff, Headphones, HeadphoneOff,
   UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff,
   MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2, X
 } from 'lucide-react';
@@ -108,6 +108,7 @@ function App() {
   const [localScreenStream, setLocalScreenStream] = useState(null);
   const [remoteVideos, setRemoteVideos] = useState([]);
   const [hiddenVideoIds, setHiddenVideoIds] = useState([]);
+  const [mutedScreenSockets, setMutedScreenSockets] = useState([]);
   const [voiceSettings, setVoiceSettings] = useState(getSavedVoiceSettings);
 
   const [showMembers, setShowMembers] = useState(true);
@@ -739,10 +740,13 @@ function App() {
                       {participants.length > 0 && (
                         <div className="voice-participants">
                           {participants.map(p => {
+                            const isMe = p.userId === user.id;
                             const srvMember = activeServer?.members?.find(m => m.id === p.userId);
-                            const vAvatarUrl = p.avatarUrl || srvMember?.avatar_url;
-                            const vDeco = (p.avatarDecoration && p.avatarDecoration !== 'none' ? p.avatarDecoration : srvMember?.avatar_decoration) || 'none';
-                            const vColor = p.avatarColor || srvMember?.avatar_color || '#5865F2';
+                            const vAvatarUrl = p.avatarUrl || (isMe ? user.avatar_url : null) || srvMember?.avatar_url;
+                            const vDeco = (p.avatarDecoration && p.avatarDecoration !== 'none'
+                              ? p.avatarDecoration
+                              : (isMe ? user.avatar_decoration : null) || srvMember?.avatar_decoration) || 'none';
+                            const vColor = p.avatarColor || (isMe ? user.avatar_color : null) || srvMember?.avatar_color || '#5865F2';
                             return (
                             <div
                               key={p.socketId}
@@ -1019,17 +1023,30 @@ function App() {
                     if (el && el.srcObject !== localScreenStream) el.srcObject = localScreenStream;
                   }}
                 />
-                <div className="screen-label">Sua Tela • 1080p 60fps AO VIVO</div>
-                <button
-                  className="screen-fullscreen-btn"
-                  title="Parar Transmissão de Tela"
-                  onClick={toggleScreenShare}
-                >
-                  <X size={14} />
-                </button>
+                <div className="screen-label">Sua Tela • 1080p 60fps</div>
+                <div className="screen-tile-controls">
+                  <button
+                    className="screen-fullscreen-btn"
+                    style={{ position: 'static' }}
+                    title="Tela Cheia"
+                    onClick={e => e.currentTarget.closest('.screen-tile')?.querySelector('video')?.requestFullscreen?.()}
+                  >
+                    <Maximize2 size={14} />
+                  </button>
+                  <button
+                    className="screen-fullscreen-btn"
+                    style={{ position: 'static' }}
+                    title="Parar Transmissão"
+                    onClick={toggleScreenShare}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
             )}
-            {remoteVideos.filter(v => !hiddenVideoIds.includes(v.id)).map(v => (
+            {remoteVideos.filter(v => !hiddenVideoIds.includes(v.id)).map(v => {
+              const isScreenMuted = mutedScreenSockets.includes(v.socketId);
+              return (
               <div key={v.id} className="screen-tile">
                 <video
                   autoPlay
@@ -1042,7 +1059,23 @@ function App() {
                 <div className="screen-label">
                   {v.kind === 'camera' ? `Câmera de ${v.displayName}` : `Tela de ${v.displayName} • 1080p 60fps`}
                 </div>
-                <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
+                <div className="screen-tile-controls">
+                  {v.kind !== 'camera' && (
+                    <button
+                      className="screen-fullscreen-btn"
+                      style={{ position: 'static' }}
+                      title={isScreenMuted ? 'Ativar áudio da tela' : 'Mutar áudio da tela'}
+                      onClick={() => {
+                        const nextMuted = !isScreenMuted;
+                        voiceManagerRef.current?.setScreenAudioMuted(v.socketId, nextMuted);
+                        setMutedScreenSockets(prev =>
+                          nextMuted ? [...prev, v.socketId] : prev.filter(id => id !== v.socketId)
+                        );
+                      }}
+                    >
+                      {isScreenMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                    </button>
+                  )}
                   <button
                     className="screen-fullscreen-btn"
                     style={{ position: 'static' }}
@@ -1061,7 +1094,8 @@ function App() {
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
