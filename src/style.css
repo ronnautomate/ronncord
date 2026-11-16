@@ -1877,3 +1877,207 @@ body {
 .modal-card.popout {
   max-width: 360px;
 }
+
+/* Profile Entrance Effects & Full-Card Themes */
+.profile-card-preview,
+.modal-card.popout {
+  position: relative;
+}
+
+.profile-fx-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+/* 1. Cyber Glitch */
+.effect-cyber-glitch {
+  animation: fxCyberEnter 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  border: 1px solid rgba(0, 229, 255, 0.55) !important;
+  box-shadow: 0 0 28px rgba(0, 229, 255, 0.28), inset 0 0 24px rgba(236, 72, 153, 0.14);
+  background: linear-gradient(160deg, #0b132b 0%, #161830 55%, #1d1135 100%) !important;
+}
+
+.effect-cyber-glitch .profile-fx-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 229, 255, 0.06) 0px,
+    rgba(0, 229, 255, 0.06) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+  animation: fxScanline 3.5s linear infinite;
+}
+
+@keyframes fxCyberEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) skewX(-4deg);
+    filter: hue-rotate(90deg) contrast(1.4);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.02) skewX(2deg);
+  }
+  70% {
+    transform: scale(0.99) skewX(-1deg);
+  }
+  100% {
+    transform: scale(1) skewX(0);
+    filter: none;
+  }
+}
+
+@keyframes fxScanline {
+  0% { transform: translateY(-20%); }
+  100% { transform: translateY(20%); }
+}
+
+/* 2. Sakura / Aurora Mística */
+.effect-sakura-glow {
+  animation: fxSakuraEnter 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+  border: 1px solid rgba(236, 72, 153, 0.5) !important;
+  box-shadow: 0 0 32px rgba(236, 72, 153, 0.32), inset 0 0 28px rgba(168, 85, 247, 0.18);
+  background: linear-gradient(160deg, #2a112d 0%, #1c1230 55%, #141428 100%) !important;
+}
+
+.effect-sakura-glow .profile-fx-overlay::before {
+  content: '✦  ✧  🌸  ✦  ✧  🌸  ✦';
+  position: absolute;
+  top: -18px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  letter-spacing: 14px;
+  font-size: 13px;
+  opacity: 0.7;
+  animation: fxFloatDown 4.5s linear infinite;
+}
+
+@keyframes fxSakuraEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.94);
+    filter: blur(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes fxFloatDown {
+  0% { transform: translateY(-20px) rotate(0deg); opacity: 0; }
+  20% { opacity: 0.85; }
+  80% { opacity: 0.65; }
+  100% { transform: translateY(280px) rotate(18deg); opacity: 0; }
+}
+
+/* 3. Fúria Carmesim */
+.effect-crimson-thunder {
+  animation: fxCrimsonImpact 0.48s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  border: 1px solid rgba(239, 68, 68, 0.6) !important;
+  box-shadow: 0 0 32px rgba(239, 68, 68, 0.36), inset 0 0 28px rgba(245, 158, 11, 0.16);
+  background: linear-gradient(160deg, #2b0b0e 0%, #1b1016 55%, #141218 100%) !important;
+}
+
+.effect-crimson-thunder .profile-fx-overlay::after {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.28) 0%, transparent 60%);
+  animation: fxEmberPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes fxCrimsonImpact {
+  0% {
+    opacity: 0;
+    transform: scale(1.12);
+    filter: brightness(1.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+@keyframes fxEmberPulse {
+  0%, 100% { transform: scale(0.85); opacity: 0.4; }
+  50% { transform: scale(1.15); opacity: 0.9; }
+}
+
+/* 4. Portal Galáctico */
+.effect-galaxy-portal {
+  animation: fxPortalSpin 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  border: 1px solid rgba(139, 92, 246, 0.6) !important;
+  box-shadow: 0 0 34px rgba(139, 92, 246, 0.38), inset 0 0 32px rgba(59, 130, 246, 0.22);
+  background: linear-gradient(160deg, #120f2d 0%, #1b1442 50%, #0f172a 100%) !important;
+}
+
+.effect-galaxy-portal .profile-fx-overlay::before {
+  content: '';
+  position: absolute;
+  top: -60px;
+  right: -60px;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent, rgba(168, 85, 247, 0.35), rgba(56, 189, 248, 0.35), transparent);
+  animation: fxOrbit 6s linear infinite;
+}
+
+@keyframes fxPortalSpin {
+  0% {
+    opacity: 0;
+    transform: scale(0.75) rotate(-6deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes fxOrbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 5. Matrix Neon */
+.effect-matrix-rain {
+  animation: fxMatrixDrop 0.52s cubic-bezier(0.22, 1, 0.36, 1);
+  border: 1px solid rgba(35, 165, 89, 0.6) !important;
+  box-shadow: 0 0 30px rgba(35, 165, 89, 0.32), inset 0 0 24px rgba(16, 185, 129, 0.16);
+  background: linear-gradient(160deg, #071f14 0%, #0d1d17 55%, #111518 100%) !important;
+}
+
+.effect-matrix-rain .profile-fx-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(35, 165, 89, 0.18) 0%, transparent 45%, rgba(35, 165, 89, 0.12) 100%);
+  animation: fxMatrixSweep 2.8s ease-in-out infinite alternate;
+}
+
+@keyframes fxMatrixDrop {
+  0% {
+    opacity: 0;
+    transform: translateY(-24px) scaleY(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes fxMatrixSweep {
+  0% { opacity: 0.35; }
+  100% { opacity: 0.85; }
+}

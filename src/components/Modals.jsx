@@ -284,6 +284,15 @@ const NAMEPLATES = [
   { id: 'golden-sunset', label: 'Ouro Solar' }
 ];
 
+const PROFILE_EFFECTS = [
+  { id: 'none', label: 'Sem efeito' },
+  { id: 'cyber-glitch', label: '⚡ Cyber Glitch' },
+  { id: 'sakura-glow', label: '🌸 Aurora Mística' },
+  { id: 'crimson-thunder', label: '🔥 Fúria Carmesim' },
+  { id: 'galaxy-portal', label: '🌌 Portal Galáctico' },
+  { id: 'matrix-rain', label: '💚 Matrix Neon' }
+];
+
 const CLAN_ICONS = ['💀', '🩵', '🔥', '⚡', '👑', '🎮', '💎', '🚀'];
 
 export const PROFILE_BADGES = [
@@ -316,6 +325,8 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
   const [clanTag, setClanTag] = useState(user.clan_tag || '');
   const [clanIcon, setClanIcon] = useState(user.clan_icon || '💀');
   const [badges, setBadges] = useState(() => parseBadges(user.badges_json));
+  const [profileEffect, setProfileEffect] = useState(user.profile_effect || 'none');
+  const [effectReplayKey, setEffectReplayKey] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const avatarFileRef = useRef(null);
@@ -360,7 +371,8 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
         nameplate_style: nameplateStyle,
         clan_tag: clanTag.trim().slice(0, 6).toUpperCase(),
         clan_icon: clanIcon,
-        badges_json: JSON.stringify(badges)
+        badges_json: JSON.stringify(badges),
+        profile_effect: profileEffect
       });
       onClose();
     } finally {
@@ -378,7 +390,11 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
 
         <form onSubmit={handleSave} className="auth-form">
           {/* Live Discord Nitro Profile Card Preview */}
-          <div className={`profile-card-preview nameplate-${nameplateStyle}`}>
+          <div
+            key={effectReplayKey}
+            className={`profile-card-preview nameplate-${nameplateStyle} effect-${profileEffect}`}
+          >
+            {profileEffect !== 'none' && <div className="profile-fx-overlay" aria-hidden="true" />}
             <div
               className="profile-banner"
               style={bannerUrl ? { backgroundImage: `url(${resolveAssetUrl(bannerUrl)})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: bannerColor }}
@@ -480,6 +496,25 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
               </div>
             </label>
           </div>
+
+          <label>
+            <span>✨ EFEITO DE ENTRADA & TEMA DO PERFIL</span>
+            <div className="deco-picker">
+              {PROFILE_EFFECTS.map(fx => (
+                <button
+                  key={fx.id}
+                  type="button"
+                  className={`deco-chip ${profileEffect === fx.id ? 'active' : ''}`}
+                  onClick={() => {
+                    setProfileEffect(fx.id);
+                    setEffectReplayKey(k => k + 1);
+                  }}
+                >
+                  {fx.label}
+                </button>
+              ))}
+            </div>
+          </label>
 
           <label>
             <span>PLACA DE FUNDO (NAMEPLATE NA LISTA DE MEMBROS)</span>
@@ -604,7 +639,14 @@ export function UserProfileModal({ member, currentUserId, onClose, onSendDM, onQ
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className={`modal-card popout nameplate-${member.nameplate_style || 'none'}`} style={{ padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+      <div
+        className={`modal-card popout nameplate-${member.nameplate_style || 'none'} effect-${member.profile_effect || 'none'}`}
+        style={{ padding: 0, overflow: 'hidden', position: 'relative' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {(member.profile_effect && member.profile_effect !== 'none') && (
+          <div className="profile-fx-overlay" aria-hidden="true" />
+        )}
         <div
           className="profile-banner"
           style={member.banner_url
