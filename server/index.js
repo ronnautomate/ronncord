@@ -284,20 +284,20 @@ app.patch('/api/auth/profile', authMiddleware, async (req, res) => {
       badges_json = COALESCE(?, badges_json),
       profile_effect = COALESCE(?, profile_effect)
      WHERE id = ?`,
-    display_name ?? null,
-    status ?? null,
-    custom_status ?? null,
-    bio ?? null,
+    display_name !== undefined ? String(display_name).trim().slice(0, 32) : null,
+    status !== undefined && ['online', 'idle', 'dnd', 'offline'].includes(status) ? status : null,
+    custom_status !== undefined ? String(custom_status).slice(0, 80) : null,
+    bio !== undefined ? String(bio).slice(0, 500) : null,
     avatar_color ?? null,
     avatar_url !== undefined ? sanitizeAssetUrl(avatar_url) : req.user.avatar_url,
     banner_color ?? null,
     banner_url !== undefined ? sanitizeAssetUrl(banner_url) : req.user.banner_url,
     avatar_decoration ?? null,
-    pronouns ?? null,
+    pronouns !== undefined ? String(pronouns).slice(0, 24) : null,
     name_color ?? null,
     nameplate_style ?? null,
     clan_tag !== undefined ? String(clan_tag).slice(0, 6).toUpperCase() : null,
-    clan_icon ?? null,
+    clan_icon !== undefined ? String(clan_icon).slice(0, 4) : null,
     badges_json !== undefined ? (typeof badges_json === 'string' ? badges_json : JSON.stringify(badges_json)) : null,
     profile_effect ?? null,
     req.user.id
@@ -483,6 +483,9 @@ app.post('/api/servers/import-discord', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Cole um link discord.new/CODIGO, um JSON exportado ou selecione um modelo pronto.' });
     }
 
+    if (channelsToCreate.length > 60) {
+      channelsToCreate = channelsToCreate.slice(0, 60);
+    }
     if (channelsToCreate.length === 0) {
       channelsToCreate = [
         { category: 'TEXT CHANNELS', name: 'general', type: 'text', topic: '' },
@@ -540,7 +543,9 @@ app.post('/api/servers/join/:inviteCode', authMiddleware, async (req, res) => {
 app.post('/api/servers/:serverId/channels', authMiddleware, async (req, res) => {
   const { serverId } = req.params;
   const member = await db.get('SELECT role FROM server_members WHERE server_id = ? AND user_id = ?', serverId, req.user.id);
-  if (!member) return res.status(403).json({ error: 'Sem acesso ao servidor' });
+  if (!member || (member.role !== 'owner' && member.role !== 'admin')) {
+    return res.status(403).json({ error: 'Apenas donos ou admins podem criar canais' });
+  }
 
   const { name, type = 'text', category, topic = '' } = req.body || {};
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Nome do canal obrigatório' });
@@ -592,15 +597,23 @@ app.post('/api/channels/:channelId/messages', authMiddleware, async (req, res) =
   }
 
   const { content = '', attachments = [], reply_to_id = null } = req.body || {};
-  if (!String(content).trim() && (!Array.isArray(attachments) || attachments.length === 0)) {
+  const trimmed = String(content).trim().slice(0, 4000);
+  if (!trimmed && (!Array.isArray(attachments) || attachments.length === 0)) {
     return res.status(400).json({ error: 'Mensagem vazia' });
+  }
+
+  let validReplyId = null;
+  if (reply_to_id) {
+    const targetMsg = await db.get('SELECT id FROM messages WHERE id = ? AND channel_id = ?', reply_to_id, channelId);
+    if (!targetMsg) return res.status(403).json({ error: 'Mensagem respondida não pertence a este canal' });
+    validReplyId = targetMsg.id;
   }
 
   const msgId = crypto.randomUUID();
   const safeAtts = sanitizeAttachments(attachments);
   await db.run(
     'INSERT INTO messages (id, channel_id, author_id, content, attachments_json, reply_to_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    msgId, channelId, req.user.id, String(content).trim(), JSON.stringify(safeAtts), reply_to_id, Date.now()
+    msgId, channelId, req.user.id, trimmed, JSON.stringify(safeAtts), validReplyId, Date.now()
   );
   const hydrated = await hydrateMessage(await db.get('SELECT * FROM messages WHERE id = ?', msgId));
   io.to(`channel:${channelId}`).emit('message:new', hydrated);
@@ -702,17 +715,12 @@ app.delete('/api/friends/:id', authMiddleware, async (req, res) => {
 
 app.get('/api/users/search', authMiddleware, async (req, res) => {
   const q = String(req.query.q || '').trim().toLowerCase();
-  const rows = q
-    ? await db.all(
-        `SELECT id, username, display_name, avatar_color, avatar_url, status, custom_status
-         FROM users WHERE id != ? AND (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?) LIMIT 20`,
-        req.user.id, `%${q}%`, `%${q}%`
-      )
-    : await db.all(
-        `SELECT id, username, display_name, avatar_color, avatar_url, status, custom_status
-         FROM users WHERE id != ? ORDER BY created_at DESC LIMIT 20`,
-        req.user.id
-      );
+  if (q.length < 2) return res.json({ users: [] });
+  const rows = await db.all(
+    `SELECT id, username, display_name, avatar_color, avatar_url, status, custom_status
+     FROM users WHERE id != ? AND (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?) LIMIT 20`,
+    req.user.id, `%${q}%`, `%${q}%`
+  );
   res.json({ users: rows });
 });
 
@@ -768,14 +776,21 @@ app.post('/api/dms/:threadId/messages', authMiddleware, async (req, res) => {
   }
 
   const { content = '', attachments = [], reply_to_id = null } = req.body || {};
-  if (!String(content).trim() && (!Array.isArray(attachments) || attachments.length === 0)) {
+  const trimmed = String(content).trim().slice(0, 4000);
+  if (!trimmed && (!Array.isArray(attachments) || attachments.length === 0)) {
     return res.status(400).json({ error: 'Mensagem vazia' });
+  }
+  let validReplyId = null;
+  if (reply_to_id) {
+    const targetMsg = await db.get('SELECT id FROM messages WHERE id = ? AND dm_thread_id = ?', reply_to_id, req.params.threadId);
+    if (!targetMsg) return res.status(403).json({ error: 'Mensagem respondida não pertence a esta DM' });
+    validReplyId = targetMsg.id;
   }
   const msgId = crypto.randomUUID();
   const safeAtts = sanitizeAttachments(attachments);
   await db.run(
     'INSERT INTO messages (id, dm_thread_id, author_id, content, attachments_json, reply_to_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    msgId, req.params.threadId, req.user.id, String(content).trim(), JSON.stringify(safeAtts), reply_to_id, Date.now()
+    msgId, req.params.threadId, req.user.id, trimmed, JSON.stringify(safeAtts), validReplyId, Date.now()
   );
   const hydrated = await hydrateMessage(await db.get('SELECT * FROM messages WHERE id = ?', msgId));
   io.to(`dm:${req.params.threadId}`).emit('message:new', hydrated);
@@ -888,11 +903,11 @@ io.on('connection', async (socket) => {
     const current = room.get(socket.id);
     const updated = {
       ...current,
-      ...(muted !== undefined ? { muted } : {}),
-      ...(deafened !== undefined ? { deafened } : {}),
-      ...(speaking !== undefined ? { speaking } : {}),
-      ...(cameraOn !== undefined ? { cameraOn } : {}),
-      ...(screenSharing !== undefined ? { screenSharing } : {})
+      ...(muted !== undefined ? { muted: Boolean(muted) } : {}),
+      ...(deafened !== undefined ? { deafened: Boolean(deafened) } : {}),
+      ...(speaking !== undefined ? { speaking: Boolean(speaking) } : {}),
+      ...(cameraOn !== undefined ? { cameraOn: Boolean(cameraOn) } : {}),
+      ...(screenSharing !== undefined ? { screenSharing: Boolean(screenSharing) } : {})
     };
     room.set(socket.id, updated);
     io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
@@ -908,6 +923,8 @@ io.on('connection', async (socket) => {
   });
 
   socket.on('webrtc:signal', ({ targetSocketId, channelId, signal }) => {
+    const room = voiceRooms.get(channelId);
+    if (!room || !room.has(socket.id) || !room.has(targetSocketId)) return;
     io.to(targetSocketId).emit('webrtc:signal', {
       fromSocketId: socket.id,
       channelId,
