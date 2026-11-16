@@ -375,6 +375,7 @@ app.post('/api/servers', authMiddleware, async (req, res) => {
   );
 
   const created = (await getFullServersForUser(req.user.id)).find(s => s.id === serverId);
+  io.in(`user:${req.user.id}`).socketsJoin(`server:${serverId}`);
   res.status(201).json({ server: created });
 });
 
@@ -513,6 +514,7 @@ app.post('/api/servers/import-discord', authMiddleware, async (req, res) => {
     }
 
     const created = (await getFullServersForUser(req.user.id)).find(s => s.id === serverId);
+    io.in(`user:${req.user.id}`).socketsJoin(`server:${serverId}`);
     res.status(201).json({ server: created });
   } catch (err) {
     res.status(500).json({ error: 'Falha ao importar template: ' + err.message });
@@ -530,6 +532,7 @@ app.post('/api/servers/join/:inviteCode', authMiddleware, async (req, res) => {
   );
   const full = (await getFullServersForUser(req.user.id)).find(s => s.id === srv.id);
   const memberObj = full?.members?.find(m => m.id === req.user.id) || { ...req.user, role: 'member' };
+  io.in(`user:${req.user.id}`).socketsJoin(`server:${srv.id}`);
   io.to(`server:${srv.id}`).emit('server:member_joined', { serverId: srv.id, member: memberObj });
   res.json({ server: full });
 });

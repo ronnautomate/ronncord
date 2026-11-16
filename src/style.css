@@ -2171,7 +2171,14 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.user-volume-actions .btn-ghost.xs,
+.user-volume-actions .btn-primary.xs {
+  padding: 4px 6px;
+  font-size: 11px;
 }
 
 /* Fullscreen Video Fix (prevents 36vh crop & green scaling artifacts) */

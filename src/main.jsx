@@ -811,7 +811,22 @@ function App() {
                             <div
                               key={p.socketId}
                               className={`voice-user clickable ${p.speaking ? 'speaking' : ''}`}
-                              title={p.userId !== user.id ? 'Botão direito para ajustar o volume (0% - 400%)' : p.displayName}
+                              title={p.userId !== user.id ? 'Clique: ver perfil / DM • Botão direito: volume (0%-400%)' : p.displayName}
+                              onClick={() => {
+                                if (srvMember) {
+                                  setSelectedProfile(srvMember);
+                                } else {
+                                  setSelectedProfile({
+                                    id: p.userId,
+                                    username: p.displayName.toLowerCase(),
+                                    display_name: p.displayName,
+                                    avatar_color: vColor,
+                                    avatar_url: vAvatarUrl,
+                                    avatar_decoration: vDeco,
+                                    status: 'online'
+                                  });
+                                }
+                              }}
                               onContextMenu={e => {
                                 if (p.userId !== user.id) {
                                   e.preventDefault();
