@@ -240,6 +240,30 @@ function App() {
             )
           }))
         );
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.author_id === userId
+              ? {
+                  ...msg,
+                  author: {
+                    ...msg.author,
+                    display_name: display_name ?? msg.author?.display_name,
+                    avatar_color: avatar_color ?? msg.author?.avatar_color,
+                    avatar_url: avatar_url !== undefined ? avatar_url : msg.author?.avatar_url,
+                    avatar_decoration: avatar_decoration ?? msg.author?.avatar_decoration,
+                    banner_color: banner_color ?? msg.author?.banner_color,
+                    banner_url: banner_url !== undefined ? banner_url : msg.author?.banner_url,
+                    name_color: name_color ?? msg.author?.name_color,
+                    nameplate_style: nameplate_style ?? msg.author?.nameplate_style,
+                    clan_tag: clan_tag ?? msg.author?.clan_tag,
+                    clan_icon: clan_icon ?? msg.author?.clan_icon,
+                    badges_json: badges_json ?? msg.author?.badges_json,
+                    profile_effect: profile_effect ?? msg.author?.profile_effect
+                  }
+                }
+              : msg
+          )
+        );
       });
       socket.on('typing:update', ({ userId, displayName, channelId, dmThreadId, isTyping }) => {
         if (userId === user.id) return;
