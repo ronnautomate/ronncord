@@ -726,10 +726,14 @@ function App() {
                               }}
                             >
                               <span
-                                className={`avatar xs ${p.speaking ? 'speaking-ring' : ''}`}
+                                className={`avatar xs ${p.speaking ? 'speaking-ring' : ''} deco-${p.avatarDecoration || 'none'}`}
                                 style={{ background: p.avatarColor }}
                               >
-                                {p.displayName[0]}
+                                {p.avatarUrl ? (
+                                  <img src={resolveAssetUrl(p.avatarUrl)} alt={p.displayName} className="avatar-img" />
+                                ) : (
+                                  p.displayName[0].toUpperCase()
+                                )}
                               </span>
                               <span className="voice-user-name">{p.displayName}</span>
                               {p.userId !== user.id && (userVolumes[p.userId] ?? 100) !== 100 && (

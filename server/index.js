@@ -321,6 +321,24 @@ app.patch('/api/auth/profile', authMiddleware, (req, res) => {
     badges_json: updated.badges_json,
     profile_effect: updated.profile_effect
   });
+  for (const [chId, room] of voiceRooms.entries()) {
+    let changed = false;
+    for (const [sid, p] of room.entries()) {
+      if (p.userId === updated.id) {
+        room.set(sid, {
+          ...p,
+          displayName: updated.display_name,
+          avatarColor: updated.avatar_color,
+          avatarUrl: updated.avatar_url || null,
+          avatarDecoration: updated.avatar_decoration || 'none'
+        });
+        changed = true;
+      }
+    }
+    if (changed) {
+      io.emit('voice:participants', { channelId: chId, participants: Array.from(room.values()) });
+    }
+  }
   res.json({ user: updated });
 });
 
@@ -844,6 +862,8 @@ io.on('connection', (socket) => {
       userId: socket.user.id,
       displayName: socket.user.display_name,
       avatarColor: socket.user.avatar_color,
+      avatarUrl: socket.user.avatar_url || null,
+      avatarDecoration: socket.user.avatar_decoration || 'none',
       muted: false,
       deafened: false,
       speaking: false,
