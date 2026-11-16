@@ -26,6 +26,34 @@ function resolveJwtSecret() {
   return generated;
 }
 const JWT_SECRET = resolveJwtSecret();
+const MSG_ENC_KEY = crypto
+  .createHash('sha256')
+  .update('ronncord-msg-v1:' + (process.env.MESSAGE_ENCRYPTION_KEY || JWT_SECRET))
+  .digest();
+
+function encryptMessageText(plain) {
+  if (!plain) return '';
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', MSG_ENC_KEY, iv);
+  const encrypted = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:v1:${iv.toString('base64')}:${tag.toString('base64')}:${encrypted.toString('base64')}`;
+}
+
+function decryptMessageText(stored) {
+  if (!stored) return '';
+  const s = String(stored);
+  if (!s.startsWith('enc:v1:')) return s;
+  try {
+    const [, , ivB64, tagB64, ctB64] = s.split(':');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', MSG_ENC_KEY, Buffer.from(ivB64, 'base64'));
+    decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
+    const dec = Buffer.concat([decipher.update(Buffer.from(ctB64, 'base64')), decipher.final()]);
+    return dec.toString('utf8');
+  } catch {
+    return '[Mensagem criptografada]';
+  }
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -109,7 +137,7 @@ async function hydrateMessage(msg) {
       'SELECT m.id, m.content, u.display_name as author_name FROM messages m JOIN users u ON u.id = m.author_id WHERE m.id = ?',
       msg.reply_to_id
     );
-    if (orig) replyTo = orig;
+    if (orig) replyTo = { ...orig, content: decryptMessageText(orig.content) };
   }
   return {
     id: msg.id,
@@ -117,7 +145,7 @@ async function hydrateMessage(msg) {
     dm_thread_id: msg.dm_thread_id,
     author_id: msg.author_id,
     author: author || { id: msg.author_id, username: 'unknown', display_name: 'Unknown', avatar_color: '#5865F2', status: 'offline' },
-    content: msg.content,
+    content: decryptMessageText(msg.content),
     attachments: JSON.parse(msg.attachments_json || '[]'),
     reply_to_id: msg.reply_to_id,
     reply_to: replyTo,
@@ -613,7 +641,7 @@ app.post('/api/channels/:channelId/messages', authMiddleware, async (req, res) =
   const safeAtts = sanitizeAttachments(attachments);
   await db.run(
     'INSERT INTO messages (id, channel_id, author_id, content, attachments_json, reply_to_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    msgId, channelId, req.user.id, trimmed, JSON.stringify(safeAtts), validReplyId, Date.now()
+    msgId, channelId, req.user.id, encryptMessageText(trimmed), JSON.stringify(safeAtts), validReplyId, Date.now()
   );
   const hydrated = await hydrateMessage(await db.get('SELECT * FROM messages WHERE id = ?', msgId));
   io.to(`channel:${channelId}`).emit('message:new', hydrated);
@@ -627,7 +655,7 @@ app.patch('/api/messages/:messageId', authMiddleware, async (req, res) => {
 
   const { content } = req.body || {};
   if (!content || !String(content).trim()) return res.status(400).json({ error: 'Conteúdo vazio' });
-  await db.run('UPDATE messages SET content = ?, edited_at = ? WHERE id = ?', String(content).trim(), Date.now(), msg.id);
+  await db.run('UPDATE messages SET content = ?, edited_at = ? WHERE id = ?', encryptMessageText(String(content).trim().slice(0, 4000)), Date.now(), msg.id);
   const hydrated = await hydrateMessage(await db.get('SELECT * FROM messages WHERE id = ?', msg.id));
   const room = msg.channel_id ? `channel:${msg.channel_id}` : `dm:${msg.dm_thread_id}`;
   io.to(room).emit('message:updated', hydrated);
@@ -790,7 +818,7 @@ app.post('/api/dms/:threadId/messages', authMiddleware, async (req, res) => {
   const safeAtts = sanitizeAttachments(attachments);
   await db.run(
     'INSERT INTO messages (id, dm_thread_id, author_id, content, attachments_json, reply_to_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    msgId, req.params.threadId, req.user.id, trimmed, JSON.stringify(safeAtts), validReplyId, Date.now()
+    msgId, req.params.threadId, req.user.id, encryptMessageText(trimmed), JSON.stringify(safeAtts), validReplyId, Date.now()
   );
   const hydrated = await hydrateMessage(await db.get('SELECT * FROM messages WHERE id = ?', msgId));
   io.to(`dm:${req.params.threadId}`).emit('message:new', hydrated);
