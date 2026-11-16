@@ -569,17 +569,48 @@ io.on('connection', (socket) => {
 
   // Voice room presence & WebRTC signaling relay
   socket.on('voice:join', (channelId) => {
+    // Leave any previous voice room first
+    for (const [prevChId, prevRoom] of voiceRooms.entries()) {
+      if (prevChId !== channelId && prevRoom.has(socket.id)) {
+        prevRoom.delete(socket.id);
+        socket.leave(`voice:${prevChId}`);
+        io.emit('voice:participants', { channelId: prevChId, participants: Array.from(prevRoom.values()) });
+      }
+    }
+
     if (!voiceRooms.has(channelId)) voiceRooms.set(channelId, new Map());
     const room = voiceRooms.get(channelId);
+    const existingPeers = Array.from(room.values());
+
     room.set(socket.id, {
       socketId: socket.id,
       userId: socket.user.id,
       displayName: socket.user.display_name,
       avatarColor: socket.user.avatar_color,
       muted: false,
-      deafened: false
+      deafened: false,
+      speaking: false,
+      screenSharing: false
     });
     socket.join(`voice:${channelId}`);
+
+    // Tell the joiner who is already in the room so they initiate WebRTC offers
+    socket.emit('voice:peers', { channelId, peers: existingPeers });
+    io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
+  });
+
+  socket.on('voice:state', ({ channelId, muted, deafened, speaking, screenSharing }) => {
+    const room = voiceRooms.get(channelId);
+    if (!room || !room.has(socket.id)) return;
+    const current = room.get(socket.id);
+    const updated = {
+      ...current,
+      ...(muted !== undefined ? { muted } : {}),
+      ...(deafened !== undefined ? { deafened } : {}),
+      ...(speaking !== undefined ? { speaking } : {}),
+      ...(screenSharing !== undefined ? { screenSharing } : {})
+    };
+    room.set(socket.id, updated);
     io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
   });
 
@@ -592,8 +623,13 @@ io.on('connection', (socket) => {
     socket.leave(`voice:${channelId}`);
   });
 
-  socket.on('webrtc:signal', ({ targetSocketId, signal }) => {
-    io.to(targetSocketId).emit('webrtc:signal', { fromSocketId: socket.id, user: socket.user, signal });
+  socket.on('webrtc:signal', ({ targetSocketId, channelId, signal }) => {
+    io.to(targetSocketId).emit('webrtc:signal', {
+      fromSocketId: socket.id,
+      channelId,
+      user: socket.user,
+      signal
+    });
   });
 
   socket.on('disconnect', () => {

@@ -2,9 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Hash, Volume2, Plus, Settings, Mic, MicOff, Headphones, HeadphoneOff,
-  UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff
+  UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff,
+  MonitorUp, MonitorOff, Sliders, Sparkles
 } from 'lucide-react';
 import { apiFetch, connectSocket, getToken, setToken } from './lib/api.js';
+import { VoiceManager } from './lib/voiceManager.js';
+import { getSavedVoiceSettings } from './lib/audioPipeline.js';
 import { AuthScreen } from './components/AuthScreen.jsx';
 import { ChatArea } from './components/ChatArea.jsx';
 import { FriendsView } from './components/FriendsView.jsx';
@@ -14,6 +17,7 @@ import {
   InviteModal,
   ProfileModal
 } from './components/Modals.jsx';
+import { VoiceSettingsModal } from './components/VoiceSettingsModal.jsx';
 import './style.css';
 
 const DEMO_USER = {
@@ -93,13 +97,19 @@ function App() {
   const [typingMap, setTypingMap] = useState({});
   const [voiceChannelId, setVoiceChannelId] = useState(null);
   const [voiceParticipants, setVoiceParticipants] = useState({});
+  const [voicePing, setVoicePing] = useState(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [remoteScreens, setRemoteScreens] = useState([]);
+  const [voiceSettings, setVoiceSettings] = useState(getSavedVoiceSettings);
 
   const [showMembers, setShowMembers] = useState(true);
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
 
-  const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile'
+  const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile' | 'voice-settings'
   const socketRef = useRef(null);
+  const voiceManagerRef = useRef(null);
 
   const activeServer = useMemo(
     () => servers.find(s => s.id === activeServerId) || null,
@@ -212,10 +222,19 @@ function App() {
       socket.on('voice:participants', ({ channelId, participants }) => {
         setVoiceParticipants(prev => ({ ...prev, [channelId]: participants }));
       });
+
+      voiceManagerRef.current = new VoiceManager(socket, {
+        onPing: setVoicePing,
+        onSpeakingChange: setIsSpeaking,
+        onRemoteStreams: setRemoteScreens,
+        onError: msg => alert(msg)
+      });
     }
 
     return () => {
       mounted = false;
+      voiceManagerRef.current?.destroy();
+      voiceManagerRef.current = null;
       socket?.disconnect();
       socketRef.current = null;
     };
@@ -445,15 +464,50 @@ function App() {
     setActiveDmId(thread.id);
   }
 
-  function toggleVoiceChannel(ch) {
+  async function toggleVoiceChannel(ch) {
+    if (isDemo) {
+      alert('Salas de voz WebRTC com supressão de ruído IA requerem o backend ativo (`npm run server`). Você já pode testar seu microfone no ícone de Configurações de Voz (Sliders)!');
+      return;
+    }
     if (voiceChannelId === ch.id) {
-      socketRef.current?.emit('voice:leave', ch.id);
+      await voiceManagerRef.current?.leave();
       setVoiceChannelId(null);
+      setIsScreenSharing(false);
     } else {
-      if (voiceChannelId) socketRef.current?.emit('voice:leave', voiceChannelId);
-      socketRef.current?.emit('voice:join', ch.id);
+      await voiceManagerRef.current?.join(ch.id, voiceSettings);
+      voiceManagerRef.current?.setMuted(muted);
+      voiceManagerRef.current?.setDeafened(deafened);
       setVoiceChannelId(ch.id);
     }
+  }
+
+  async function toggleScreenShare() {
+    if (!voiceChannelId) return;
+    if (isScreenSharing) {
+      voiceManagerRef.current?.stopScreenShare();
+      setIsScreenSharing(false);
+    } else {
+      try {
+        await voiceManagerRef.current?.startScreenShare();
+        setIsScreenSharing(true);
+      } catch (err) {
+        if (err.name !== 'NotAllowedError') {
+          alert('Erro ao compartilhar tela: ' + err.message);
+        }
+      }
+    }
+  }
+
+  function handleToggleMute() {
+    const next = !muted;
+    setMuted(next);
+    voiceManagerRef.current?.setMuted(next);
+  }
+
+  function handleToggleDeafen() {
+    const next = !deafened;
+    setDeafened(next);
+    voiceManagerRef.current?.setDeafened(next);
   }
 
   if (booting) {
@@ -572,11 +626,16 @@ function App() {
                       {participants.length > 0 && (
                         <div className="voice-participants">
                           {participants.map(p => (
-                            <div key={p.socketId} className="voice-user">
-                              <span className="avatar xs" style={{ background: p.avatarColor }}>
+                            <div key={p.socketId} className={`voice-user ${p.speaking ? 'speaking' : ''}`}>
+                              <span
+                                className={`avatar xs ${p.speaking ? 'speaking-ring' : ''}`}
+                                style={{ background: p.avatarColor }}
+                              >
                                 {p.displayName[0]}
                               </span>
-                              <span>{p.displayName}</span>
+                              <span className="voice-user-name">{p.displayName}</span>
+                              {p.muted && <MicOff size={12} className="voice-badge-muted" />}
+                              {p.screenSharing && <span className="live-badge">AO VIVO</span>}
                             </div>
                           ))}
                         </div>
@@ -626,25 +685,51 @@ function App() {
         {voiceChannelId && (
           <div className="voice-status-bar">
             <div>
-              <strong>Voz Conectada</strong>
-              <small>Pronto para Fase 2 WebRTC</small>
+              <strong>
+                <Sparkles size={12} style={{ display: 'inline', marginRight: 4 }} />
+                Voz Conectada {voicePing !== null ? `• ${voicePing} ms` : ''}
+              </strong>
+              <small>
+                {voiceSettings.noiseMode === 'gtcrn'
+                  ? 'AI Ultra (GTCRN) • Opus 10ms'
+                  : voiceSettings.noiseMode === 'rnnoise'
+                  ? 'RNNoise SIMD • Opus 10ms'
+                  : 'Estúdio Puro • Opus 10ms'}
+              </small>
             </div>
-            <button
-              className="icon-btn danger"
-              title="Desconectar"
-              onClick={() => {
-                socketRef.current?.emit('voice:leave', voiceChannelId);
-                setVoiceChannelId(null);
-              }}
-            >
-              <PhoneOff size={16} />
-            </button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button
+                className={`icon-btn ${isScreenSharing ? 'active' : ''}`}
+                title={isScreenSharing ? 'Parar Compartilhamento' : 'Compartilhar Tela'}
+                onClick={toggleScreenShare}
+              >
+                {isScreenSharing ? <MonitorOff size={16} /> : <MonitorUp size={16} />}
+              </button>
+              <button
+                className="icon-btn"
+                title="Configurações de Voz e Supressão IA"
+                onClick={() => setModal('voice-settings')}
+              >
+                <Sliders size={16} />
+              </button>
+              <button
+                className="icon-btn danger"
+                title="Desconectar"
+                onClick={async () => {
+                  await voiceManagerRef.current?.leave();
+                  setVoiceChannelId(null);
+                  setIsScreenSharing(false);
+                }}
+              >
+                <PhoneOff size={16} />
+              </button>
+            </div>
           </div>
         )}
 
         <div className="user-panel">
           <div className="user-panel-left" onClick={() => setModal('profile')}>
-            <div className="avatar" style={{ background: user.avatar_color }}>
+            <div className={`avatar ${isSpeaking ? 'speaking-ring' : ''}`} style={{ background: user.avatar_color }}>
               {(user.display_name || user.username)[0].toUpperCase()}
               <span className={`status-dot ${user.status}`} />
             </div>
@@ -654,11 +739,14 @@ function App() {
             </div>
           </div>
           <div className="user-panel-actions">
-            <button className={`icon-btn xs ${muted ? 'danger' : ''}`} onClick={() => setMuted(v => !v)} title="Silenciar Microfone">
+            <button className={`icon-btn xs ${muted ? 'danger' : ''}`} onClick={handleToggleMute} title="Silenciar Microfone">
               {muted ? <MicOff size={16} /> : <Mic size={16} />}
             </button>
-            <button className={`icon-btn xs ${deafened ? 'danger' : ''}`} onClick={() => setDeafened(v => !v)} title="Desativar Áudio">
+            <button className={`icon-btn xs ${deafened ? 'danger' : ''}`} onClick={handleToggleDeafen} title="Desativar Áudio">
               {deafened ? <HeadphoneOff size={16} /> : <Headphones size={16} />}
+            </button>
+            <button className="icon-btn xs" onClick={() => setModal('voice-settings')} title="Áudio & Supressão de Ruído IA">
+              <Sliders size={16} />
             </button>
             <button className="icon-btn xs" onClick={() => setModal('profile')} title="Configurações de Perfil">
               <Settings size={16} />
@@ -668,6 +756,24 @@ function App() {
       </aside>
 
       {/* Main Content */}
+      <div className="main-stage">
+        {remoteScreens.length > 0 && (
+          <div className="screen-share-stage">
+            {remoteScreens.map(sc => (
+              <div key={sc.socketId} className="screen-tile">
+                <video
+                  autoPlay
+                  playsInline
+                  ref={el => {
+                    if (el && el.srcObject !== sc.stream) el.srcObject = sc.stream;
+                  }}
+                />
+                <div className="screen-label">Tela de {sc.displayName}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
       {viewMode === 'server' && activeChannel ? (
         <ChatArea
           title={activeChannel.name}
@@ -726,6 +832,7 @@ function App() {
           onOpenDM={handleOpenDM}
         />
       )}
+      </div>
 
       {/* Members Sidebar */}
       {viewMode === 'server' && showMembers && activeServer && (
@@ -791,6 +898,15 @@ function App() {
           onClose={() => setModal(null)}
           onSave={handleSaveProfile}
           onLogout={handleLogout}
+        />
+      )}
+      {modal === 'voice-settings' && (
+        <VoiceSettingsModal
+          onClose={() => setModal(null)}
+          onApplySettings={async newSettings => {
+            setVoiceSettings(newSettings);
+            await voiceManagerRef.current?.reloadPipeline(newSettings);
+          }}
         />
       )}
     </div>
