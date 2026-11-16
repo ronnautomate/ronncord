@@ -1,0 +1,409 @@
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Hash, AtSign, Search, Users, PlusCircle, Smile, SendHorizontal,
+  Reply, Pencil, Trash2, X, Paperclip, FileText
+} from 'lucide-react';
+import { resolveAssetUrl } from '../lib/api.js';
+
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '🚀', '👀', '🎉', '💯'];
+
+function formatTime(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderFormattedText(text) {
+  if (!text) return null;
+  const parts = text.split(/(```[\s\S]*?```|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|https?:\/\/[^\s]+)/g);
+  return parts.map((part, idx) => {
+    if (part.startsWith('```') && part.endsWith('```')) {
+      return <pre key={idx} className="code-block"><code>{part.slice(3, -3).trim()}</code></pre>;
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={idx} className="inline-code">{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={idx}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return <em key={idx}>{part.slice(1, -1)}</em>;
+    }
+    if (/^https?:\/\//.test(part)) {
+      return <a key={idx} href={part} target="_blank" rel="noreferrer">{part}</a>;
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
+}
+
+export function ChatArea({
+  title,
+  topic,
+  isDM = false,
+  messages,
+  currentUser,
+  typingUsers = [],
+  showMembers,
+  onToggleMembers,
+  onSendMessage,
+  onEditMessage,
+  onDeleteMessage,
+  onToggleReaction,
+  onUploadFile,
+  onTyping
+}) {
+  const [text, setText] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [replyTo, setReplyTo] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState('');
+  const [attachments, setAttachments] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [reactingMsgId, setReactingMsgId] = useState(null);
+
+  const bottomRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, title]);
+
+  function handleTextChange(val) {
+    setText(val);
+    if (onTyping) {
+      onTyping(true);
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => onTyping(false), 1800);
+    }
+  }
+
+  async function handleFileSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const uploaded = await onUploadFile(file);
+      setAttachments(prev => [...prev, uploaded]);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!text.trim() && attachments.length === 0) return;
+    const content = text.trim();
+    const currentAttachments = [...attachments];
+    const currentReply = replyTo?.id || null;
+
+    setText('');
+    setAttachments([]);
+    setReplyTo(null);
+    setShowEmojiPicker(false);
+    if (onTyping) onTyping(false);
+
+    await onSendMessage({ content, attachments: currentAttachments, reply_to_id: currentReply });
+  }
+
+  async function submitEdit(e) {
+    e.preventDefault();
+    if (!editText.trim()) return;
+    await onEditMessage(editingId, editText.trim());
+    setEditingId(null);
+    setEditText('');
+  }
+
+  const visibleMessages = searchQuery.trim()
+    ? messages.filter(m =>
+        m.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.author?.display_name?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : messages;
+
+  return (
+    <main className="chat-area">
+      <header className="chat-header">
+        <div className="chat-header-title">
+          {isDM ? <AtSign size={20} className="header-icon" /> : <Hash size={20} className="header-icon" />}
+          <strong>{title}</strong>
+          {topic && <span className="chat-topic">{topic}</span>}
+        </div>
+
+        <div className="header-actions">
+          <div className="search-box">
+            <Search size={14} />
+            <input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Buscar mensagens..."
+            />
+            {searchQuery && (
+              <button className="icon-btn xs" onClick={() => setSearchQuery('')}>
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          {!isDM && (
+            <button
+              className={`icon-btn ${showMembers ? 'active' : ''}`}
+              title="Mostrar/Ocultar Membros"
+              onClick={onToggleMembers}
+            >
+              <Users size={18} />
+            </button>
+          )}
+        </div>
+      </header>
+
+      <section className="messages">
+        <div className="welcome">
+          <div className="welcome-icon">{isDM ? '@' : '#'}</div>
+          <h1>{isDM ? `Conversa com ${title}` : `Bem-vindo a #${title}`}</h1>
+          <p>
+            {isDM
+              ? `Este é o início do seu histórico de mensagens diretas com ${title}.`
+              : `Este é o começo do canal #${title}. ${topic || ''}`}
+          </p>
+        </div>
+
+        {visibleMessages.map((msg, i) => {
+          const prev = visibleMessages[i - 1];
+          const grouped =
+            prev &&
+            prev.author_id === msg.author_id &&
+            !msg.reply_to &&
+            msg.created_at - prev.created_at < 5 * 60 * 1000;
+          const isMine = msg.author_id === currentUser.id;
+          const authorName = msg.author?.display_name || msg.author?.username || 'Usuário';
+          const avatarColor = msg.author?.avatar_color || '#5865F2';
+
+          return (
+            <div className={`message ${grouped ? 'grouped' : ''}`} key={msg.id}>
+              {msg.reply_to && (
+                <div className="reply-reference">
+                  <Reply size={12} />
+                  <strong>{msg.reply_to.author_name}</strong>
+                  <span>{msg.reply_to.content}</span>
+                </div>
+              )}
+
+              <div className="message-row">
+                {!grouped ? (
+                  <div className="avatar message-avatar" style={{ background: avatarColor }}>
+                    {authorName[0].toUpperCase()}
+                  </div>
+                ) : (
+                  <div className="message-time-gutter">{formatTime(msg.created_at)}</div>
+                )}
+
+                <div className="message-body">
+                  {!grouped && (
+                    <div className="message-meta">
+                      <strong>{authorName}</strong>
+                      <small>{formatTime(msg.created_at)}</small>
+                    </div>
+                  )}
+
+                  {editingId === msg.id ? (
+                    <form onSubmit={submitEdit} className="edit-form">
+                      <input
+                        autoFocus
+                        value={editText}
+                        onChange={e => setEditText(e.target.value)}
+                        onKeyDown={e => e.key === 'Escape' && setEditingId(null)}
+                      />
+                      <small>Enter para salvar • Esc para cancelar</small>
+                    </form>
+                  ) : (
+                    msg.content && (
+                      <p className="message-text">
+                        {renderFormattedText(msg.content)}
+                        {msg.edited_at && <span className="edited-tag">(editado)</span>}
+                      </p>
+                    )
+                  )}
+
+                  {msg.attachments?.length > 0 && (
+                    <div className="attachments-list">
+                      {msg.attachments.map((att, idx) => {
+                        const fullUrl = resolveAssetUrl(att.url);
+                        const isImg = att.mimetype?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(att.name || '');
+                        return isImg ? (
+                          <a key={idx} href={fullUrl} target="_blank" rel="noreferrer" className="attachment-image-wrap">
+                            <img src={fullUrl} alt={att.name} />
+                          </a>
+                        ) : (
+                          <a key={idx} href={fullUrl} target="_blank" rel="noreferrer" className="attachment-file">
+                            <FileText size={18} />
+                            <span>{att.name}</span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {msg.reactions?.length > 0 && (
+                    <div className="reactions-row">
+                      {msg.reactions.map(r => {
+                        const iReacted = r.users.includes(currentUser.id);
+                        return (
+                          <button
+                            key={r.emoji}
+                            type="button"
+                            className={`reaction-pill ${iReacted ? 'mine' : ''}`}
+                            onClick={() => onToggleReaction(msg.id, r.emoji)}
+                          >
+                            <span>{r.emoji}</span>
+                            <span>{r.count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="message-actions">
+                  <button
+                    type="button"
+                    title="Reagir"
+                    onClick={() => setReactingMsgId(reactingMsgId === msg.id ? null : msg.id)}
+                  >
+                    <Smile size={15} />
+                  </button>
+                  <button type="button" title="Responder" onClick={() => setReplyTo(msg)}>
+                    <Reply size={15} />
+                  </button>
+                  {isMine && (
+                    <>
+                      <button
+                        type="button"
+                        title="Editar"
+                        onClick={() => { setEditingId(msg.id); setEditText(msg.content); }}
+                      >
+                        <Pencil size={15} />
+                      </button>
+                      <button type="button" title="Apagar" className="danger" onClick={() => onDeleteMessage(msg.id)}>
+                        <Trash2 size={15} />
+                      </button>
+                    </>
+                  )}
+
+                  {reactingMsgId === msg.id && (
+                    <div className="emoji-popover">
+                      {QUICK_EMOJIS.map(em => (
+                        <button
+                          key={em}
+                          type="button"
+                          onClick={() => {
+                            onToggleReaction(msg.id, em);
+                            setReactingMsgId(null);
+                          }}
+                        >
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </section>
+
+      <div className="composer-wrapper">
+        {typingUsers.length > 0 && (
+          <div className="typing-indicator">
+            <span className="typing-dots"><i /><i /><i /></span>
+            <span>
+              <strong>{typingUsers.join(', ')}</strong> {typingUsers.length === 1 ? 'está digitando...' : 'estão digitando...'}
+            </span>
+          </div>
+        )}
+
+        {replyTo && (
+          <div className="reply-banner">
+            <span>Respondendo a <strong>{replyTo.author?.display_name}</strong></span>
+            <button type="button" className="icon-btn xs" onClick={() => setReplyTo(null)}>
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        {attachments.length > 0 && (
+          <div className="pending-attachments">
+            {attachments.map((att, idx) => (
+              <div key={idx} className="pending-att-chip">
+                <Paperclip size={13} />
+                <span>{att.name}</span>
+                <button type="button" onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))}>
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form className="message-form" onSubmit={handleSubmit}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            hidden
+            onChange={handleFileSelect}
+          />
+          <button
+            type="button"
+            className="add-button"
+            title="Enviar arquivo ou imagem"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <PlusCircle size={20} />
+          </button>
+
+          <input
+            value={text}
+            onChange={e => handleTextChange(e.target.value)}
+            placeholder={uploading ? 'Enviando arquivo...' : `Conversar em ${isDM ? '@' : '#'}${title}`}
+          />
+
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              className="icon-btn"
+              title="Emoji"
+              onClick={() => setShowEmojiPicker(v => !v)}
+            >
+              <Smile size={20} />
+            </button>
+            {showEmojiPicker && (
+              <div className="emoji-popover bottom-right">
+                {QUICK_EMOJIS.map(em => (
+                  <button
+                    key={em}
+                    type="button"
+                    onClick={() => {
+                      setText(prev => prev + em);
+                      setShowEmojiPicker(false);
+                    }}
+                  >
+                    {em}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button type="submit" className="send-button" title="Enviar">
+            <SendHorizontal size={18} />
+          </button>
+        </form>
+      </div>
+    </main>
+  );
+}

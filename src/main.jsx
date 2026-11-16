@@ -1,152 +1,798 @@
-
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import {
+  Hash, Volume2, Plus, Settings, Mic, MicOff, Headphones, HeadphoneOff,
+  UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff
+} from 'lucide-react';
+import { apiFetch, connectSocket, getToken, setToken } from './lib/api.js';
+import { AuthScreen } from './components/AuthScreen.jsx';
+import { ChatArea } from './components/ChatArea.jsx';
+import { FriendsView } from './components/FriendsView.jsx';
+import {
+  CreateOrJoinServerModal,
+  CreateChannelModal,
+  InviteModal,
+  ProfileModal
+} from './components/Modals.jsx';
 import './style.css';
 
-const initialMessages = [
-  { id: 1, user: 'Ronn', time: '14:32', text: 'Welcome to RONNCORD! 🚀' },
-  { id: 2, user: 'Alex', time: '14:34', text: 'Finally, our own voice platform!' },
-  { id: 3, user: 'Ronn', time: '14:35', text: 'Built for us, not everyone else.' }
+const DEMO_USER = {
+  id: 'demo-user',
+  username: 'ronn',
+  display_name: 'Ronn (Demo)',
+  avatar_color: '#5865F2',
+  status: 'online',
+  custom_status: 'Modo Demo Offline',
+  bio: 'Criador do RONNCORD'
+};
+
+const DEMO_SERVERS = [
+  {
+    id: 'demo-srv-1',
+    name: 'RONNCORD',
+    icon_color: '#5865F2',
+    invite_code: 'ronncord-hub',
+    owner_id: 'demo-user',
+    my_role: 'owner',
+    channels: [
+      { id: 'demo-ch-1', server_id: 'demo-srv-1', category: 'TEXT CHANNELS', name: 'general', type: 'text', topic: 'Chat geral da comunidade RONNCORD' },
+      { id: 'demo-ch-2', server_id: 'demo-srv-1', category: 'TEXT CHANNELS', name: 'introductions', type: 'text', topic: 'Apresente-se!' },
+      { id: 'demo-ch-3', server_id: 'demo-srv-1', category: 'TEXT CHANNELS', name: 'gaming', type: 'text', topic: 'Partidas e calls' },
+      { id: 'demo-ch-4', server_id: 'demo-srv-1', category: 'VOICE CHANNELS', name: 'General Voice', type: 'voice', topic: '' },
+      { id: 'demo-ch-5', server_id: 'demo-srv-1', category: 'VOICE CHANNELS', name: 'Gaming Room', type: 'voice', topic: '' }
+    ],
+    members: [
+      DEMO_USER,
+      { id: 'demo-alex', username: 'alex', display_name: 'Alex', avatar_color: '#57F287', status: 'online', custom_status: 'Jogando Valorant', role: 'admin' },
+      { id: 'demo-sam', username: 'sam', display_name: 'Sam', avatar_color: '#EB459E', status: 'idle', custom_status: '', role: 'member' }
+    ]
+  }
 ];
 
+const DEMO_INITIAL_MESSAGES = {
+  'demo-ch-1': [
+    {
+      id: 'm1',
+      channel_id: 'demo-ch-1',
+      author_id: 'demo-user',
+      author: DEMO_USER,
+      content: 'Bem-vindo ao **RONNCORD**! 🚀 Plataforma própria com API ilimitada.',
+      attachments: [],
+      reactions: [{ emoji: '🚀', count: 2, users: ['demo-user', 'demo-alex'] }],
+      created_at: Date.now() - 120000
+    },
+    {
+      id: 'm2',
+      channel_id: 'demo-ch-1',
+      author_id: 'demo-alex',
+      author: { id: 'demo-alex', username: 'alex', display_name: 'Alex', avatar_color: '#57F287', status: 'online' },
+      content: 'Inicie o backend (`npm run server`) para usar tempo real com múltiplos usuários, upload de arquivos e WebSockets!',
+      attachments: [],
+      reactions: [],
+      created_at: Date.now() - 60000
+    }
+  ]
+};
+
 function App() {
-  const [channel, setChannel] = useState('general');
-  const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState(initialMessages);
+  const [user, setUser] = useState(null);
+  const [isDemo, setIsDemo] = useState(false);
+  const [booting, setBooting] = useState(true);
 
-  function sendMessage(e) {
-    e.preventDefault();
-    if (!message.trim()) return;
+  const [servers, setServers] = useState([]);
+  const [viewMode, setViewMode] = useState('server'); // 'server' | 'home'
+  const [activeServerId, setActiveServerId] = useState(null);
+  const [activeChannelId, setActiveChannelId] = useState(null);
 
-    setMessages([
-      ...messages,
-      {
-        id: Date.now(),
-        user: 'You',
-        time: new Date().toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit'
-        }),
-        text: message.trim()
+  const [friends, setFriends] = useState([]);
+  const [dmThreads, setDmThreads] = useState([]);
+  const [activeDmId, setActiveDmId] = useState(null);
+
+  const [messages, setMessages] = useState([]);
+  const [demoMessagesMap, setDemoMessagesMap] = useState(DEMO_INITIAL_MESSAGES);
+  const [typingMap, setTypingMap] = useState({});
+  const [voiceChannelId, setVoiceChannelId] = useState(null);
+  const [voiceParticipants, setVoiceParticipants] = useState({});
+
+  const [showMembers, setShowMembers] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const [deafened, setDeafened] = useState(false);
+
+  const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile'
+  const socketRef = useRef(null);
+
+  const activeServer = useMemo(
+    () => servers.find(s => s.id === activeServerId) || null,
+    [servers, activeServerId]
+  );
+
+  const activeChannel = useMemo(
+    () => activeServer?.channels?.find(c => c.id === activeChannelId) || null,
+    [activeServer, activeChannelId]
+  );
+
+  const activeDm = useMemo(
+    () => dmThreads.find(t => t.id === activeDmId) || null,
+    [dmThreads, activeDmId]
+  );
+
+  // Boot auth check
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      setBooting(false);
+      return;
+    }
+    apiFetch('/api/auth/me')
+      .then(data => setUser(data.user))
+      .catch(() => setToken(''))
+      .finally(() => setBooting(false));
+  }, []);
+
+  // Load servers, friends, DMs & Socket.IO when user logs in
+  useEffect(() => {
+    if (!user || isDemo) return;
+    let mounted = true;
+
+    async function loadInitial() {
+      try {
+        const [srvData, frData, dmData] = await Promise.all([
+          apiFetch('/api/servers'),
+          apiFetch('/api/friends'),
+          apiFetch('/api/dms')
+        ]);
+        if (!mounted) return;
+        setServers(srvData.servers);
+        setFriends(frData.friends);
+        setDmThreads(dmData.threads);
+
+        if (srvData.servers.length > 0) {
+          const first = srvData.servers[0];
+          setActiveServerId(first.id);
+          const firstText = first.channels.find(c => c.type === 'text');
+          if (firstText) setActiveChannelId(firstText.id);
+        }
+      } catch (err) {
+        console.error(err);
       }
-    ]);
-    setMessage('');
+    }
+    loadInitial();
+
+    const socket = connectSocket(getToken());
+    socketRef.current = socket;
+    if (socket) {
+      socket.on('message:new', msg => {
+        setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+      });
+      socket.on('message:updated', msg => {
+        setMessages(prev => prev.map(m => (m.id === msg.id ? msg : m)));
+      });
+      socket.on('message:deleted', ({ id }) => {
+        setMessages(prev => prev.filter(m => m.id !== id));
+      });
+      socket.on('channel:created', ch => {
+        setServers(prev =>
+          prev.map(s => (s.id === ch.server_id ? { ...s, channels: [...s.channels, ch] } : s))
+        );
+      });
+      socket.on('channel:deleted', ({ serverId, channelId }) => {
+        setServers(prev =>
+          prev.map(s => (s.id === serverId ? { ...s, channels: s.channels.filter(c => c.id !== channelId) } : s))
+        );
+      });
+      socket.on('presence:update', ({ userId, status, custom_status, display_name, avatar_color }) => {
+        setServers(prev =>
+          prev.map(s => ({
+            ...s,
+            members: s.members.map(m =>
+              m.id === userId
+                ? {
+                    ...m,
+                    status: status ?? m.status,
+                    custom_status: custom_status ?? m.custom_status,
+                    display_name: display_name ?? m.display_name,
+                    avatar_color: avatar_color ?? m.avatar_color
+                  }
+                : m
+            )
+          }))
+        );
+      });
+      socket.on('typing:update', ({ userId, displayName, channelId, dmThreadId, isTyping }) => {
+        if (userId === user.id) return;
+        const key = channelId || dmThreadId;
+        setTypingMap(prev => {
+          const cur = prev[key] || {};
+          const next = { ...cur };
+          if (isTyping) next[userId] = displayName;
+          else delete next[userId];
+          return { ...prev, [key]: next };
+        });
+      });
+      socket.on('voice:participants', ({ channelId, participants }) => {
+        setVoiceParticipants(prev => ({ ...prev, [channelId]: participants }));
+      });
+    }
+
+    return () => {
+      mounted = false;
+      socket?.disconnect();
+      socketRef.current = null;
+    };
+  }, [user, isDemo]);
+
+  // Load channel or DM messages
+  useEffect(() => {
+    if (!user) return;
+    if (viewMode === 'server' && activeChannelId) {
+      if (isDemo) {
+        setMessages(demoMessagesMap[activeChannelId] || []);
+        return;
+      }
+      socketRef.current?.emit('join_channel', activeChannelId);
+      apiFetch(`/api/channels/${activeChannelId}/messages`)
+        .then(data => setMessages(data.messages))
+        .catch(console.error);
+      return () => socketRef.current?.emit('leave_channel', activeChannelId);
+    }
+    if (viewMode === 'home' && activeDmId) {
+      if (isDemo) {
+        setMessages(demoMessagesMap[activeDmId] || []);
+        return;
+      }
+      socketRef.current?.emit('join_dm', activeDmId);
+      apiFetch(`/api/dms/${activeDmId}/messages`)
+        .then(data => setMessages(data.messages))
+        .catch(console.error);
+    }
+  }, [user, isDemo, viewMode, activeChannelId, activeDmId]);
+
+  function enterDemoMode() {
+    setIsDemo(true);
+    setUser(DEMO_USER);
+    setServers(DEMO_SERVERS);
+    setActiveServerId('demo-srv-1');
+    setActiveChannelId('demo-ch-1');
+    setMessages(DEMO_INITIAL_MESSAGES['demo-ch-1']);
   }
+
+  function handleLogout() {
+    setToken('');
+    socketRef.current?.disconnect();
+    setUser(null);
+    setIsDemo(false);
+    setServers([]);
+    setMessages([]);
+    setModal(null);
+  }
+
+  async function handleCreateServer(name) {
+    if (isDemo) {
+      const id = `demo-srv-${Date.now()}`;
+      const chId = `demo-ch-${Date.now()}`;
+      const srv = {
+        id,
+        name,
+        icon_color: '#57F287',
+        invite_code: `demo-${Math.random().toString(36).slice(2, 6)}`,
+        owner_id: user.id,
+        my_role: 'owner',
+        channels: [{ id: chId, server_id: id, category: 'TEXT CHANNELS', name: 'general', type: 'text', topic: 'Canal geral' }],
+        members: [user]
+      };
+      setServers(prev => [...prev, srv]);
+      setViewMode('server');
+      setActiveServerId(id);
+      setActiveChannelId(chId);
+      return;
+    }
+    const { server } = await apiFetch('/api/servers', { method: 'POST', body: JSON.stringify({ name }) });
+    setServers(prev => [...prev, server]);
+    setViewMode('server');
+    setActiveServerId(server.id);
+    const firstText = server.channels.find(c => c.type === 'text');
+    if (firstText) setActiveChannelId(firstText.id);
+  }
+
+  async function handleJoinServer(inviteCode) {
+    if (isDemo) throw new Error('Entre com uma conta real para entrar em servidores por convite.');
+    const { server } = await apiFetch(`/api/servers/join/${encodeURIComponent(inviteCode)}`, { method: 'POST' });
+    setServers(prev => (prev.some(s => s.id === server.id) ? prev : [...prev, server]));
+    setViewMode('server');
+    setActiveServerId(server.id);
+    const firstText = server.channels.find(c => c.type === 'text');
+    if (firstText) setActiveChannelId(firstText.id);
+  }
+
+  async function handleCreateChannel({ name, type, topic }) {
+    if (!activeServer) return;
+    if (isDemo) {
+      const ch = {
+        id: `demo-ch-${Date.now()}`,
+        server_id: activeServer.id,
+        category: type === 'voice' ? 'VOICE CHANNELS' : 'TEXT CHANNELS',
+        name,
+        type,
+        topic
+      };
+      setServers(prev => prev.map(s => (s.id === activeServer.id ? { ...s, channels: [...s.channels, ch] } : s)));
+      if (type === 'text') setActiveChannelId(ch.id);
+      return;
+    }
+    const { channel } = await apiFetch(`/api/servers/${activeServer.id}/channels`, {
+      method: 'POST',
+      body: JSON.stringify({ name, type, topic })
+    });
+    setServers(prev =>
+      prev.map(s =>
+        s.id === activeServer.id && !s.channels.some(c => c.id === channel.id)
+          ? { ...s, channels: [...s.channels, channel] }
+          : s
+      )
+    );
+    if (channel.type === 'text') setActiveChannelId(channel.id);
+  }
+
+  async function handleSendMessage(payload) {
+    if (isDemo) {
+      const targetId = viewMode === 'server' ? activeChannelId : activeDmId;
+      const newMsg = {
+        id: `m-${Date.now()}`,
+        channel_id: viewMode === 'server' ? targetId : null,
+        dm_thread_id: viewMode === 'home' ? targetId : null,
+        author_id: user.id,
+        author: user,
+        content: payload.content,
+        attachments: payload.attachments || [],
+        reply_to_id: payload.reply_to_id,
+        reactions: [],
+        created_at: Date.now()
+      };
+      setDemoMessagesMap(prev => ({ ...prev, [targetId]: [...(prev[targetId] || []), newMsg] }));
+      setMessages(prev => [...prev, newMsg]);
+      return;
+    }
+
+    if (viewMode === 'server' && activeChannelId) {
+      await apiFetch(`/api/channels/${activeChannelId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+    } else if (viewMode === 'home' && activeDmId) {
+      await apiFetch(`/api/dms/${activeDmId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+    }
+  }
+
+  async function handleEditMessage(messageId, content) {
+    if (isDemo) {
+      setMessages(prev => prev.map(m => (m.id === messageId ? { ...m, content, edited_at: Date.now() } : m)));
+      return;
+    }
+    await apiFetch(`/api/messages/${messageId}`, { method: 'PATCH', body: JSON.stringify({ content }) });
+  }
+
+  async function handleDeleteMessage(messageId) {
+    if (isDemo) {
+      setMessages(prev => prev.filter(m => m.id !== messageId));
+      return;
+    }
+    await apiFetch(`/api/messages/${messageId}`, { method: 'DELETE' });
+  }
+
+  async function handleToggleReaction(messageId, emoji) {
+    if (isDemo) {
+      setMessages(prev =>
+        prev.map(m => {
+          if (m.id !== messageId) return m;
+          const existing = m.reactions.find(r => r.emoji === emoji);
+          let next;
+          if (existing) {
+            const hasMine = existing.users.includes(user.id);
+            const users = hasMine ? existing.users.filter(u => u !== user.id) : [...existing.users, user.id];
+            next = users.length ? m.reactions.map(r => (r.emoji === emoji ? { emoji, count: users.length, users } : r)) : m.reactions.filter(r => r.emoji !== emoji);
+          } else {
+            next = [...m.reactions, { emoji, count: 1, users: [user.id] }];
+          }
+          return { ...m, reactions: next };
+        })
+      );
+      return;
+    }
+    await apiFetch(`/api/messages/${messageId}/reactions`, { method: 'POST', body: JSON.stringify({ emoji }) });
+  }
+
+  async function handleUploadFile(file) {
+    if (isDemo) {
+      return {
+        url: URL.createObjectURL(file),
+        name: file.name,
+        size: file.size,
+        mimetype: file.type
+      };
+    }
+    const fd = new FormData();
+    fd.append('file', file);
+    return apiFetch('/api/upload', { method: 'POST', body: fd });
+  }
+
+  async function handleSaveProfile(updates) {
+    if (isDemo) {
+      setUser(prev => ({ ...prev, ...updates }));
+      return;
+    }
+    const { user: updated } = await apiFetch('/api/auth/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(updates)
+    });
+    setUser(updated);
+  }
+
+  async function handleOpenDM(targetUserId) {
+    if (targetUserId === user.id) return;
+    if (isDemo) {
+      alert('Mensagens diretas em tempo real requerem o backend ativo.');
+      return;
+    }
+    const { thread } = await apiFetch('/api/dms', {
+      method: 'POST',
+      body: JSON.stringify({ targetUserId })
+    });
+    setDmThreads(prev => (prev.some(t => t.id === thread.id) ? prev : [thread, ...prev]));
+    setViewMode('home');
+    setActiveDmId(thread.id);
+  }
+
+  function toggleVoiceChannel(ch) {
+    if (voiceChannelId === ch.id) {
+      socketRef.current?.emit('voice:leave', ch.id);
+      setVoiceChannelId(null);
+    } else {
+      if (voiceChannelId) socketRef.current?.emit('voice:leave', voiceChannelId);
+      socketRef.current?.emit('voice:join', ch.id);
+      setVoiceChannelId(ch.id);
+    }
+  }
+
+  if (booting) {
+    return <div className="boot-screen">Carregando RONNCORD...</div>;
+  }
+
+  if (!user) {
+    return <AuthScreen onAuthSuccess={setUser} onEnterDemo={enterDemoMode} />;
+  }
+
+  const currentTypingKey = viewMode === 'server' ? activeChannelId : activeDmId;
+  const typingUsers = Object.values(typingMap[currentTypingKey] || {});
+
+  const textChannels = activeServer?.channels?.filter(c => c.type === 'text') || [];
+  const voiceChannels = activeServer?.channels?.filter(c => c.type === 'voice') || [];
+  const onlineMembers = activeServer?.members?.filter(m => m.status !== 'offline') || [];
+  const offlineMembers = activeServer?.members?.filter(m => m.status === 'offline') || [];
 
   return (
     <div className="app">
+      {/* Server Rail */}
       <aside className="server-rail">
-        <div className="server-logo active">R</div>
+        <button
+          className={`server-logo ${viewMode === 'home' ? 'active' : ''}`}
+          title="Mensagens Diretas e Amigos"
+          onClick={() => { setViewMode('home'); setActiveDmId(null); }}
+        >
+          <Compass size={22} />
+        </button>
+
         <div className="rail-divider" />
-        <div className="server-logo">+</div>
-        <div className="server-logo">⚙</div>
+
+        {servers.map(srv => (
+          <button
+            key={srv.id}
+            className={`server-logo ${viewMode === 'server' && activeServerId === srv.id ? 'active' : ''}`}
+            style={viewMode === 'server' && activeServerId === srv.id ? { background: srv.icon_color } : {}}
+            title={srv.name}
+            onClick={() => {
+              setViewMode('server');
+              setActiveServerId(srv.id);
+              const firstText = srv.channels.find(c => c.type === 'text');
+              setActiveChannelId(firstText?.id || null);
+            }}
+          >
+            {srv.name.slice(0, 2).toUpperCase()}
+          </button>
+        ))}
+
+        <button
+          className="server-logo add-server-btn"
+          title="Criar ou Entrar em Servidor"
+          onClick={() => setModal('server')}
+        >
+          <Plus size={22} />
+        </button>
       </aside>
 
+      {/* Channels / DMs Sidebar */}
       <aside className="sidebar">
-        <div className="workspace-title">
-          <span>RONNCORD</span>
-          <span>⌄</span>
-        </div>
-
-        <div className="sidebar-section">
-          <p className="section-label">WORKSPACE</p>
-          <div className="nav-item">⌂ <span>Home</span></div>
-          <div className="nav-item">◉ <span>Friends</span></div>
-          <div className="nav-item">✉ <span>Messages</span></div>
-        </div>
-
-        <div className="sidebar-section">
-          <div className="section-heading">
-            <p className="section-label">TEXT CHANNELS</p>
-            <span>+</span>
-          </div>
-
-          {['general', 'introductions', 'gaming', 'memes'].map(name => (
-            <div
-              key={name}
-              className={`channel ${channel === name ? 'selected' : ''}`}
-              onClick={() => setChannel(name)}
-            >
-              <span>#</span> {name}
+        {viewMode === 'server' && activeServer ? (
+          <>
+            <div className="workspace-title">
+              <span>{activeServer.name}</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  className="icon-btn xs"
+                  title="Convidar Amigos"
+                  onClick={() => setModal('invite')}
+                >
+                  <UserPlus size={16} />
+                </button>
+                <ChevronDown size={16} />
+              </div>
             </div>
-          ))}
-        </div>
 
-        <div className="sidebar-section">
-          <div className="section-heading">
-            <p className="section-label">VOICE CHANNELS</p>
-            <span>+</span>
+            <div className="sidebar-scroll">
+              <div className="sidebar-section">
+                <div className="section-heading">
+                  <p className="section-label">CANAIS DE TEXTO</p>
+                  <button className="icon-btn xs" title="Criar Canal de Texto" onClick={() => setModal('channel-text')}>
+                    <Plus size={14} />
+                  </button>
+                </div>
+                {textChannels.map(ch => (
+                  <div
+                    key={ch.id}
+                    className={`channel ${activeChannelId === ch.id ? 'selected' : ''}`}
+                    onClick={() => setActiveChannelId(ch.id)}
+                  >
+                    <Hash size={16} />
+                    <span>{ch.name}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="sidebar-section">
+                <div className="section-heading">
+                  <p className="section-label">CANAIS DE VOZ</p>
+                  <button className="icon-btn xs" title="Criar Canal de Voz" onClick={() => setModal('channel-voice')}>
+                    <Plus size={14} />
+                  </button>
+                </div>
+                {voiceChannels.map(ch => {
+                  const participants = voiceParticipants[ch.id] || [];
+                  const connectedHere = voiceChannelId === ch.id;
+                  return (
+                    <div key={ch.id}>
+                      <div
+                        className={`channel ${connectedHere ? 'selected' : ''}`}
+                        onClick={() => toggleVoiceChannel(ch)}
+                      >
+                        <Volume2 size={16} />
+                        <span>{ch.name}</span>
+                      </div>
+                      {participants.length > 0 && (
+                        <div className="voice-participants">
+                          {participants.map(p => (
+                            <div key={p.socketId} className="voice-user">
+                              <span className="avatar xs" style={{ background: p.avatarColor }}>
+                                {p.displayName[0]}
+                              </span>
+                              <span>{p.displayName}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="workspace-title">
+              <span>Início</span>
+            </div>
+            <div className="sidebar-scroll">
+              <div className="sidebar-section">
+                <div
+                  className={`channel ${!activeDmId ? 'selected' : ''}`}
+                  onClick={() => setActiveDmId(null)}
+                >
+                  <Users size={16} />
+                  <span>Amigos</span>
+                </div>
+              </div>
+              <div className="sidebar-section">
+                <div className="section-heading">
+                  <p className="section-label">MENSAGENS DIRETAS</p>
+                </div>
+                {dmThreads.map(t => (
+                  <div
+                    key={t.id}
+                    className={`channel ${activeDmId === t.id ? 'selected' : ''}`}
+                    onClick={() => setActiveDmId(t.id)}
+                  >
+                    <div className="avatar xs" style={{ background: t.peer_avatar_color }}>
+                      {(t.peer_display_name || t.peer_username)[0].toUpperCase()}
+                    </div>
+                    <span>{t.peer_display_name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {voiceChannelId && (
+          <div className="voice-status-bar">
+            <div>
+              <strong>Voz Conectada</strong>
+              <small>Pronto para Fase 2 WebRTC</small>
+            </div>
+            <button
+              className="icon-btn danger"
+              title="Desconectar"
+              onClick={() => {
+                socketRef.current?.emit('voice:leave', voiceChannelId);
+                setVoiceChannelId(null);
+              }}
+            >
+              <PhoneOff size={16} />
+            </button>
           </div>
-          <div className="channel"><span>◖</span> General Voice</div>
-          <div className="channel"><span>◖</span> Gaming Room</div>
-        </div>
+        )}
 
         <div className="user-panel">
-          <div className="avatar">R</div>
-          <div className="user-details">
-            <strong>Ronn</strong>
-            <small>Online</small>
+          <div className="user-panel-left" onClick={() => setModal('profile')}>
+            <div className="avatar" style={{ background: user.avatar_color }}>
+              {(user.display_name || user.username)[0].toUpperCase()}
+              <span className={`status-dot ${user.status}`} />
+            </div>
+            <div className="user-details">
+              <strong>{user.display_name}</strong>
+              <small>{user.custom_status || `@${user.username}`}</small>
+            </div>
           </div>
-          <span>⚙</span>
+          <div className="user-panel-actions">
+            <button className={`icon-btn xs ${muted ? 'danger' : ''}`} onClick={() => setMuted(v => !v)} title="Silenciar Microfone">
+              {muted ? <MicOff size={16} /> : <Mic size={16} />}
+            </button>
+            <button className={`icon-btn xs ${deafened ? 'danger' : ''}`} onClick={() => setDeafened(v => !v)} title="Desativar Áudio">
+              {deafened ? <HeadphoneOff size={16} /> : <Headphones size={16} />}
+            </button>
+            <button className="icon-btn xs" onClick={() => setModal('profile')} title="Configurações de Perfil">
+              <Settings size={16} />
+            </button>
+          </div>
         </div>
       </aside>
 
-      <main className="chat-area">
-        <header className="chat-header">
-          <div>
-            <span className="hash">#</span>
-            <strong>{channel}</strong>
-          </div>
-          <div className="header-actions">
-            <span>⌕</span>
-            <span>?</span>
-          </div>
-        </header>
+      {/* Main Content */}
+      {viewMode === 'server' && activeChannel ? (
+        <ChatArea
+          title={activeChannel.name}
+          topic={activeChannel.topic}
+          messages={messages}
+          currentUser={user}
+          typingUsers={typingUsers}
+          showMembers={showMembers}
+          onToggleMembers={() => setShowMembers(v => !v)}
+          onSendMessage={handleSendMessage}
+          onEditMessage={handleEditMessage}
+          onDeleteMessage={handleDeleteMessage}
+          onToggleReaction={handleToggleReaction}
+          onUploadFile={handleUploadFile}
+          onTyping={isTyping =>
+            socketRef.current?.emit(isTyping ? 'typing_start' : 'typing_stop', { channelId: activeChannel.id })
+          }
+        />
+      ) : viewMode === 'home' && activeDm ? (
+        <ChatArea
+          title={activeDm.peer_display_name}
+          topic={`@${activeDm.peer_username}`}
+          isDM
+          messages={messages}
+          currentUser={user}
+          typingUsers={typingUsers}
+          onSendMessage={handleSendMessage}
+          onEditMessage={handleEditMessage}
+          onDeleteMessage={handleDeleteMessage}
+          onToggleReaction={handleToggleReaction}
+          onUploadFile={handleUploadFile}
+          onTyping={isTyping =>
+            socketRef.current?.emit(isTyping ? 'typing_start' : 'typing_stop', { dmThreadId: activeDm.id })
+          }
+        />
+      ) : (
+        <FriendsView
+          friends={friends}
+          currentUserId={user.id}
+          onAddFriend={async username => {
+            if (isDemo) throw new Error('Disponível com o backend ativo.');
+            await apiFetch('/api/friends/request', { method: 'POST', body: JSON.stringify({ username }) });
+            const d = await apiFetch('/api/friends');
+            setFriends(d.friends);
+          }}
+          onAcceptFriend={async id => {
+            await apiFetch(`/api/friends/${id}/accept`, { method: 'POST' });
+            const d = await apiFetch('/api/friends');
+            setFriends(d.friends);
+          }}
+          onRemoveFriend={async id => {
+            await apiFetch(`/api/friends/${id}`, { method: 'DELETE' });
+            const d = await apiFetch('/api/friends');
+            setFriends(d.friends);
+          }}
+          onOpenDM={handleOpenDM}
+        />
+      )}
 
-        <section className="messages">
-          <div className="welcome">
-            <div className="welcome-icon">#</div>
-            <h1>Welcome to #{channel}</h1>
-            <p>This is the beginning of this channel.</p>
-          </div>
-
-          {messages.map(msg => (
-            <div className="message" key={msg.id}>
-              <div className="avatar message-avatar">
-                {msg.user[0]}
+      {/* Members Sidebar */}
+      {viewMode === 'server' && showMembers && activeServer && (
+        <aside className="members">
+          <h3>ONLINE — {onlineMembers.length}</h3>
+          {onlineMembers.map(m => (
+            <div className="member" key={m.id} onClick={() => handleOpenDM(m.id)} title="Clique para enviar DM">
+              <div className="avatar" style={{ background: m.avatar_color }}>
+                {(m.display_name || m.username)[0].toUpperCase()}
+                <span className={`status-dot ${m.status}`} />
               </div>
-              <div>
-                <div className="message-meta">
-                  <strong>{msg.user}</strong>
-                  <small>{msg.time}</small>
+              <div className="member-info">
+                <div className="member-name">
+                  <span>{m.display_name}</span>
+                  {m.role === 'owner' && <Crown size={12} className="role-crown" />}
+                  {m.role === 'admin' && <Shield size={12} className="role-admin" />}
                 </div>
-                <p>{msg.text}</p>
+                {m.custom_status && <small>{m.custom_status}</small>}
               </div>
             </div>
           ))}
-        </section>
 
-        <form className="message-form" onSubmit={sendMessage}>
-          <button type="button" className="add-button">+</button>
-          <input
-            value={message}
-            onChange={e => setMessage(e.target.value)}
-            placeholder={`Message #${channel}`}
-          />
-          <button type="submit" className="send-button">➤</button>
-        </form>
-      </main>
+          {offlineMembers.length > 0 && (
+            <>
+              <h3 style={{ marginTop: 18 }}>OFFLINE — {offlineMembers.length}</h3>
+              {offlineMembers.map(m => (
+                <div className="member offline" key={m.id} onClick={() => handleOpenDM(m.id)}>
+                  <div className="avatar" style={{ background: m.avatar_color }}>
+                    {(m.display_name || m.username)[0].toUpperCase()}
+                    <span className="status-dot offline" />
+                  </div>
+                  <div className="member-info">
+                    <span>{m.display_name}</span>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </aside>
+      )}
 
-      <aside className="members">
-        <h3>ONLINE — 3</h3>
-        {['Ronn', 'Alex', 'Sam'].map(name => (
-          <div className="member" key={name}>
-            <div className="avatar">{name[0]}</div>
-            <span>{name}</span>
-            <i />
-          </div>
-        ))}
-      </aside>
+      {/* Modals */}
+      {modal === 'server' && (
+        <CreateOrJoinServerModal
+          onClose={() => setModal(null)}
+          onCreateServer={handleCreateServer}
+          onJoinServer={handleJoinServer}
+        />
+      )}
+      {(modal === 'channel-text' || modal === 'channel-voice') && (
+        <CreateChannelModal
+          defaultType={modal === 'channel-voice' ? 'voice' : 'text'}
+          onClose={() => setModal(null)}
+          onCreate={handleCreateChannel}
+        />
+      )}
+      {modal === 'invite' && activeServer && (
+        <InviteModal server={activeServer} onClose={() => setModal(null)} />
+      )}
+      {modal === 'profile' && (
+        <ProfileModal
+          user={user}
+          onClose={() => setModal(null)}
+          onSave={handleSaveProfile}
+          onLogout={handleLogout}
+        />
+      )}
     </div>
   );
 }
