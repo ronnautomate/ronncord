@@ -200,7 +200,11 @@ function App() {
           prev.map(s => (s.id === serverId ? { ...s, channels: s.channels.filter(c => c.id !== channelId) } : s))
         );
       });
-      socket.on('presence:update', ({ userId, status, custom_status, display_name, avatar_color, avatar_url, avatar_decoration, banner_color, pronouns, bio }) => {
+      socket.on('presence:update', ({
+        userId, status, custom_status, display_name, avatar_color, avatar_url,
+        avatar_decoration, banner_color, banner_url, pronouns, bio,
+        name_color, nameplate_style, clan_tag, clan_icon, badges_json, profile_effect
+      }) => {
         setServers(prev =>
           prev.map(s => ({
             ...s,
@@ -215,8 +219,15 @@ function App() {
                     avatar_url: avatar_url !== undefined ? avatar_url : m.avatar_url,
                     avatar_decoration: avatar_decoration ?? m.avatar_decoration,
                     banner_color: banner_color ?? m.banner_color,
+                    banner_url: banner_url !== undefined ? banner_url : m.banner_url,
                     pronouns: pronouns ?? m.pronouns,
-                    bio: bio ?? m.bio
+                    bio: bio ?? m.bio,
+                    name_color: name_color ?? m.name_color,
+                    nameplate_style: nameplate_style ?? m.nameplate_style,
+                    clan_tag: clan_tag ?? m.clan_tag,
+                    clan_icon: clan_icon ?? m.clan_icon,
+                    badges_json: badges_json ?? m.badges_json,
+                    profile_effect: profile_effect ?? m.profile_effect
                   }
                 : m
             )
@@ -338,6 +349,19 @@ function App() {
     if (isDemo) throw new Error('Entre com uma conta real para entrar em servidores por convite.');
     const { server } = await apiFetch(`/api/servers/join/${encodeURIComponent(inviteCode)}`, { method: 'POST' });
     setServers(prev => (prev.some(s => s.id === server.id) ? prev : [...prev, server]));
+    setViewMode('server');
+    setActiveServerId(server.id);
+    const firstText = server.channels.find(c => c.type === 'text');
+    if (firstText) setActiveChannelId(firstText.id);
+  }
+
+  async function handleImportDiscord(payload) {
+    if (isDemo) throw new Error('Entre com uma conta real para importar servidores do Discord.');
+    const { server } = await apiFetch('/api/servers/import-discord', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    setServers(prev => [...prev, server]);
     setViewMode('server');
     setActiveServerId(server.id);
     const firstText = server.channels.find(c => c.type === 'text');
@@ -972,7 +996,12 @@ function App() {
         <aside className="members">
           <h3>ONLINE — {onlineMembers.length}</h3>
           {onlineMembers.map(m => (
-            <div className="member" key={m.id} onClick={() => setSelectedProfile(m)} title="Clique para ver perfil">
+            <div
+              className={`member nameplate-${m.nameplate_style || 'none'}`}
+              key={m.id}
+              onClick={() => setSelectedProfile(m)}
+              title="Clique para ver perfil"
+            >
               <div className={`avatar deco-${m.avatar_decoration || 'none'}`} style={{ background: m.avatar_color }}>
                 {m.avatar_url ? (
                   <img src={resolveAssetUrl(m.avatar_url)} alt={m.display_name} className="avatar-img" />
@@ -983,7 +1012,10 @@ function App() {
               </div>
               <div className="member-info">
                 <div className="member-name">
-                  <span>{m.display_name}</span>
+                  <span style={{ color: m.name_color || 'inherit' }}>{m.display_name}</span>
+                  {m.clan_tag && (
+                    <span className="clan-tag-pill sm">{m.clan_icon || '💀'} {m.clan_tag}</span>
+                  )}
                   {m.role === 'owner' && <Crown size={12} className="role-crown" />}
                   {m.role === 'admin' && <Shield size={12} className="role-admin" />}
                 </div>
@@ -1021,6 +1053,7 @@ function App() {
           onClose={() => setModal(null)}
           onCreateServer={handleCreateServer}
           onJoinServer={handleJoinServer}
+          onImportDiscord={handleImportDiscord}
         />
       )}
       {(modal === 'channel-text' || modal === 'channel-voice') && (
@@ -1054,6 +1087,20 @@ function App() {
           currentUserId={user.id}
           onClose={() => setSelectedProfile(null)}
           onSendDM={handleOpenDM}
+          onQuickDmMessage={async (targetUserId, content) => {
+            if (isDemo) return;
+            const { thread } = await apiFetch('/api/dms', {
+              method: 'POST',
+              body: JSON.stringify({ targetUserId })
+            });
+            await apiFetch(`/api/dms/${thread.id}/messages`, {
+              method: 'POST',
+              body: JSON.stringify({ content })
+            });
+            setDmThreads(prev => (prev.some(t => t.id === thread.id) ? prev : [thread, ...prev]));
+            setViewMode('home');
+            setActiveDmId(thread.id);
+          }}
         />
       )}
       {modal === 'voice-settings' && (

@@ -115,7 +115,14 @@ db.exec(`
 for (const col of [
   "ALTER TABLE users ADD COLUMN banner_color TEXT NOT NULL DEFAULT '#5865F2'",
   "ALTER TABLE users ADD COLUMN avatar_decoration TEXT NOT NULL DEFAULT 'none'",
-  "ALTER TABLE users ADD COLUMN pronouns TEXT NOT NULL DEFAULT ''"
+  "ALTER TABLE users ADD COLUMN pronouns TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE users ADD COLUMN name_color TEXT NOT NULL DEFAULT '#f2f3f5'",
+  "ALTER TABLE users ADD COLUMN nameplate_style TEXT NOT NULL DEFAULT 'none'",
+  "ALTER TABLE users ADD COLUMN clan_tag TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE users ADD COLUMN clan_icon TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE users ADD COLUMN badges_json TEXT NOT NULL DEFAULT '[]'",
+  "ALTER TABLE users ADD COLUMN profile_effect TEXT NOT NULL DEFAULT 'none'",
+  "ALTER TABLE users ADD COLUMN banner_url TEXT"
 ]) {
   try { db.exec(col); } catch {}
 }

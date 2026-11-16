@@ -90,7 +90,12 @@ function authMiddleware(req, res, next) {
 
 function hydrateMessage(msg) {
   if (!msg) return null;
-  const author = db.prepare('SELECT id, username, display_name, avatar_color, avatar_url, avatar_decoration, banner_color, pronouns, bio, custom_status, status FROM users WHERE id = ?').get(msg.author_id);
+  const author = db.prepare(`
+    SELECT id, username, display_name, avatar_color, avatar_url, avatar_decoration,
+      banner_color, banner_url, pronouns, bio, custom_status, status,
+      name_color, nameplate_style, clan_tag, clan_icon, badges_json, profile_effect
+    FROM users WHERE id = ?
+  `).get(msg.author_id);
   const reactionRows = db.prepare('SELECT emoji, user_id FROM reactions WHERE message_id = ?').all(msg.id);
   const grouped = {};
   for (const r of reactionRows) {
@@ -173,7 +178,10 @@ function getFullServersForUser(userId) {
   return servers.map(s => {
     const channels = db.prepare('SELECT * FROM channels WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(s.id);
     const members = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_color, u.avatar_url, u.avatar_decoration, u.banner_color, u.pronouns, u.status, u.custom_status, u.bio, sm.role
+      SELECT u.id, u.username, u.display_name, u.avatar_color, u.avatar_url, u.avatar_decoration,
+        u.banner_color, u.banner_url, u.pronouns, u.status, u.custom_status, u.bio,
+        u.name_color, u.nameplate_style, u.clan_tag, u.clan_icon, u.badges_json, u.profile_effect,
+        sm.role
       FROM server_members sm
       JOIN users u ON u.id = sm.user_id
       WHERE sm.server_id = ?
@@ -238,7 +246,11 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
 });
 
 app.patch('/api/auth/profile', authMiddleware, (req, res) => {
-  const { display_name, status, custom_status, bio, avatar_color, avatar_url, banner_color, avatar_decoration, pronouns } = req.body || {};
+  const {
+    display_name, status, custom_status, bio, avatar_color, avatar_url,
+    banner_color, banner_url, avatar_decoration, pronouns,
+    name_color, nameplate_style, clan_tag, clan_icon, badges_json, profile_effect
+  } = req.body || {};
   db.prepare(`
     UPDATE users SET
       display_name = COALESCE(?, display_name),
@@ -246,10 +258,17 @@ app.patch('/api/auth/profile', authMiddleware, (req, res) => {
       custom_status = COALESCE(?, custom_status),
       bio = COALESCE(?, bio),
       avatar_color = COALESCE(?, avatar_color),
-      avatar_url = COALESCE(?, avatar_url),
+      avatar_url = ?,
       banner_color = COALESCE(?, banner_color),
+      banner_url = ?,
       avatar_decoration = COALESCE(?, avatar_decoration),
-      pronouns = COALESCE(?, pronouns)
+      pronouns = COALESCE(?, pronouns),
+      name_color = COALESCE(?, name_color),
+      nameplate_style = COALESCE(?, nameplate_style),
+      clan_tag = COALESCE(?, clan_tag),
+      clan_icon = COALESCE(?, clan_icon),
+      badges_json = COALESCE(?, badges_json),
+      profile_effect = COALESCE(?, profile_effect)
     WHERE id = ?
   `).run(
     display_name ?? null,
@@ -257,10 +276,17 @@ app.patch('/api/auth/profile', authMiddleware, (req, res) => {
     custom_status ?? null,
     bio ?? null,
     avatar_color ?? null,
-    avatar_url ?? null,
+    avatar_url !== undefined ? avatar_url : req.user.avatar_url,
     banner_color ?? null,
+    banner_url !== undefined ? banner_url : req.user.banner_url,
     avatar_decoration ?? null,
     pronouns ?? null,
+    name_color ?? null,
+    nameplate_style ?? null,
+    clan_tag !== undefined ? String(clan_tag).slice(0, 6).toUpperCase() : null,
+    clan_icon ?? null,
+    badges_json !== undefined ? (typeof badges_json === 'string' ? badges_json : JSON.stringify(badges_json)) : null,
+    profile_effect ?? null,
     req.user.id
   );
   const updated = sanitizeUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id));
@@ -273,8 +299,15 @@ app.patch('/api/auth/profile', authMiddleware, (req, res) => {
     avatar_url: updated.avatar_url,
     avatar_decoration: updated.avatar_decoration,
     banner_color: updated.banner_color,
+    banner_url: updated.banner_url,
     pronouns: updated.pronouns,
-    bio: updated.bio
+    bio: updated.bio,
+    name_color: updated.name_color,
+    nameplate_style: updated.nameplate_style,
+    clan_tag: updated.clan_tag,
+    clan_icon: updated.clan_icon,
+    badges_json: updated.badges_json,
+    profile_effect: updated.profile_effect
   });
   res.json({ user: updated });
 });
@@ -314,6 +347,117 @@ app.post('/api/servers', authMiddleware, (req, res) => {
 
   const created = getFullServersForUser(req.user.id).find(s => s.id === serverId);
   res.status(201).json({ server: created });
+});
+
+const DISCORD_PRESETS = {
+  gaming: {
+    name: 'Squad Gaming',
+    channels: [
+      { category: 'INFORMAÇÕES', name: 'regras', type: 'text', topic: 'Regras do clã' },
+      { category: 'INFORMAÇÕES', name: 'avisos', type: 'text', topic: 'Anúncios e campeonatos' },
+      { category: 'COMUNIDADE', name: 'chat-geral', type: 'text', topic: 'Resenha e papo furado' },
+      { category: 'COMUNIDADE', name: 'clips-e-highlights', type: 'text', topic: 'Mande suas jogadas!' },
+      { category: 'COMUNIDADE', name: 'procurando-duo', type: 'text', topic: 'Monte sua pt aqui' },
+      { category: 'CALLS DE JOGO', name: 'Lobby Geral', type: 'voice' },
+      { category: 'CALLS DE JOGO', name: 'Ranked 5v5', type: 'voice' },
+      { category: 'CALLS DE JOGO', name: 'AFK / Stream', type: 'voice' }
+    ]
+  },
+  community: {
+    name: 'Comunidade VIP',
+    channels: [
+      { category: 'BOAS-VINDAS', name: 'bem-vindo', type: 'text', topic: 'Apresente-se!' },
+      { category: 'BOAS-VINDAS', name: 'cargos', type: 'text', topic: 'Escolha seus interesses' },
+      { category: 'CONVERSA', name: 'geral', type: 'text', topic: 'Chat principal' },
+      { category: 'CONVERSA', name: 'midia-e-memes', type: 'text', topic: 'Fotos, vídeos e GIFs' },
+      { category: 'CONVERSA', name: 'musicas-e-filmes', type: 'text', topic: 'Recomendações' },
+      { category: 'VOZ', name: 'Bate-Papo', type: 'voice' },
+      { category: 'VOZ', name: 'Cinema 1080p60', type: 'voice' }
+    ]
+  },
+  dev: {
+    name: 'Dev & Tech Hub',
+    channels: [
+      { category: 'GERAL', name: 'announcements', type: 'text', topic: 'Novidades e releases' },
+      { category: 'GERAL', name: 'general', type: 'text', topic: 'Discussões gerais' },
+      { category: 'DESENVOLVIMENTO', name: 'frontend-react', type: 'text', topic: 'UI, CSS e React' },
+      { category: 'DESENVOLVIMENTO', name: 'backend-api', type: 'text', topic: 'Node, DBs e Infra' },
+      { category: 'DESENVOLVIMENTO', name: 'showcase', type: 'text', topic: 'Mostre seus projetos' },
+      { category: 'VOZ', name: 'Daily / Pair Coding', type: 'voice' },
+      { category: 'VOZ', name: 'Chill Coding', type: 'voice' }
+    ]
+  }
+};
+
+app.post('/api/servers/import-discord', authMiddleware, async (req, res) => {
+  const { templateInput, preset, customName } = req.body || {};
+  let serverName = customName ? String(customName).trim() : '';
+  let channelsToCreate = [];
+
+  try {
+    if (templateInput && String(templateInput).trim()) {
+      const raw = String(templateInput).trim();
+      const match = raw.match(/(?:discord\.new\/|templates\/)?([A-Za-z0-9]{6,20})$/);
+      const code = match ? match[1] : raw;
+      const resp = await fetch(`https://discord.com/api/v9/guilds/templates/${encodeURIComponent(code)}`);
+      if (!resp.ok) {
+        return res.status(400).json({ error: 'Template do Discord inválido ou privado. Use um link discord.new/CODIGO válido ou escolha um modelo pronto.' });
+      }
+      const tpl = await resp.json();
+      const guild = tpl.serialized_source_guild || {};
+      if (!serverName) serverName = tpl.name || guild.name || 'Servidor Importado';
+
+      const rawChannels = Array.isArray(guild.channels) ? guild.channels : [];
+      const categories = new Map();
+      for (const ch of rawChannels) {
+        if (ch.type === 4) categories.set(ch.id, ch.name.toUpperCase());
+      }
+      const sorted = rawChannels
+        .filter(ch => ch.type === 0 || ch.type === 2 || ch.type === 5)
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+
+      channelsToCreate = sorted.map(ch => ({
+        category: (ch.parent_id !== null && categories.get(ch.parent_id)) || (ch.type === 2 ? 'VOICE CHANNELS' : 'TEXT CHANNELS'),
+        name: ch.name || 'canal',
+        type: ch.type === 2 ? 'voice' : 'text',
+        topic: ch.topic || ''
+      }));
+    } else if (preset && DISCORD_PRESETS[preset]) {
+      const p = DISCORD_PRESETS[preset];
+      if (!serverName) serverName = p.name;
+      channelsToCreate = p.channels;
+    } else {
+      return res.status(400).json({ error: 'Informe um link/código de template do Discord (discord.new/...) ou selecione um modelo.' });
+    }
+
+    if (channelsToCreate.length === 0) {
+      channelsToCreate = [
+        { category: 'TEXT CHANNELS', name: 'general', type: 'text', topic: '' },
+        { category: 'VOICE CHANNELS', name: 'General Voice', type: 'voice', topic: '' }
+      ];
+    }
+
+    const serverId = crypto.randomUUID();
+    const now = Date.now();
+    const inviteCode = makeInviteCode();
+    db.prepare('INSERT INTO servers (id, name, icon_color, owner_id, invite_code, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      serverId, serverName, pickColor(), req.user.id, inviteCode, now
+    );
+    db.prepare('INSERT INTO server_members (server_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)').run(serverId, req.user.id, 'owner', now);
+
+    const insertCh = db.prepare('INSERT INTO channels (id, server_id, category, name, type, topic, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    channelsToCreate.forEach((ch, idx) => {
+      const cleanName = ch.type === 'text'
+        ? String(ch.name).trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '') || 'canal'
+        : String(ch.name).trim() || 'Voz';
+      insertCh.run(crypto.randomUUID(), serverId, ch.category, cleanName, ch.type, ch.topic || '', idx, now);
+    });
+
+    const created = getFullServersForUser(req.user.id).find(s => s.id === serverId);
+    res.status(201).json({ server: created });
+  } catch (err) {
+    res.status(500).json({ error: 'Falha ao importar template: ' + err.message });
+  }
 });
 
 app.post('/api/servers/join/:inviteCode', authMiddleware, (req, res) => {

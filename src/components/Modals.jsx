@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { X, Copy, Check, Hash, Volume2, Upload, Sparkles, MessageSquare, Search } from 'lucide-react';
 import { apiFetch, resolveAssetUrl } from '../lib/api.js';
 
-export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer }) {
+export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer, onImportDiscord }) {
   const [tab, setTab] = useState('create');
   const [name, setName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
+  const [templateInput, setTemplateInput] = useState('');
+  const [preset, setPreset] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -16,8 +18,10 @@ export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer 
     try {
       if (tab === 'create') {
         await onCreateServer(name);
-      } else {
+      } else if (tab === 'join') {
         await onJoinServer(inviteCode);
+      } else {
+        await onImportDiscord({ templateInput, preset, customName: name });
       }
       onClose();
     } catch (err) {
@@ -29,15 +33,20 @@ export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer 
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={e => e.stopPropagation()}>
+      <div className="modal-card wide" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>{tab === 'create' ? 'Criar um Servidor' : 'Entrar em um Servidor'}</h2>
+          <h2>
+            {tab === 'create' ? 'Criar um Servidor' : tab === 'join' ? 'Entrar em um Servidor' : 'Importar Servidor do Discord'}
+          </h2>
           <button className="icon-btn" onClick={onClose}><X size={18} /></button>
         </div>
 
-        <div className="auth-tabs" style={{ marginBottom: 16 }}>
+        <div className="auth-tabs" style={{ gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 16 }}>
           <button type="button" className={tab === 'create' ? 'active' : ''} onClick={() => { setTab('create'); setError(''); }}>
             Criar Novo
+          </button>
+          <button type="button" className={tab === 'import' ? 'active' : ''} onClick={() => { setTab('import'); setError(''); }}>
+            Importar Discord
           </button>
           <button type="button" className={tab === 'join' ? 'active' : ''} onClick={() => { setTab('join'); setError(''); }}>
             Usar Convite
@@ -56,7 +65,7 @@ export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer 
                 autoFocus
               />
             </label>
-          ) : (
+          ) : tab === 'join' ? (
             <label>
               <span>CÓDIGO DE CONVITE</span>
               <input
@@ -67,12 +76,55 @@ export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer 
                 autoFocus
               />
             </label>
+          ) : (
+            <>
+              <label>
+                <span>LINK OU CÓDIGO DO MODELO DO DISCORD (OPCIONAL)</span>
+                <input
+                  value={templateInput}
+                  onChange={e => { setTemplateInput(e.target.value); if (e.target.value) setPreset(''); }}
+                  placeholder="https://discord.new/xxxxxx ou código do template"
+                />
+                <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                  No Discord: Configurações do Servidor → Modelo do Servidor → Copiar Link.
+                </small>
+              </label>
+
+              <label>
+                <span>OU ESCOLHA UM SERVIDOR PRONTO</span>
+                <div className="deco-picker">
+                  {[
+                    { id: 'gaming', label: '🎮 Squad Gaming' },
+                    { id: 'community', label: '🌟 Comunidade VIP' },
+                    { id: 'dev', label: '💻 Dev & Tech Hub' }
+                  ].map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={`deco-chip ${preset === p.id ? 'active' : ''}`}
+                      onClick={() => { setPreset(p.id); setTemplateInput(''); }}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+
+              <label>
+                <span>NOME PERSONALIZADO (OPCIONAL)</span>
+                <input
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Deixe vazio para usar o nome original do modelo"
+                />
+              </label>
+            </>
           )}
           {error && <div className="auth-error">{error}</div>}
           <div className="modal-actions">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button>
             <button type="submit" className="btn-primary" disabled={loading}>
-              {loading ? 'Processando...' : tab === 'create' ? 'Criar Servidor' : 'Entrar'}
+              {loading ? 'Processando...' : tab === 'create' ? 'Criar Servidor' : tab === 'join' ? 'Entrar' : 'Clonar Servidor'}
             </button>
           </div>
         </form>
@@ -201,7 +253,7 @@ export function InviteModal({ server, onClose }) {
   );
 }
 
-const COLORS = ['#5865F2', '#57F287', '#FEE75C', '#EB459E', '#ED4245', '#3BA55C', '#9B59B6', '#E67E22'];
+const COLORS = ['#f2f3f5', '#f0b232', '#5865F2', '#57F287', '#EB459E', '#ED4245', '#00e5ff', '#9B59B6'];
 
 const BANNERS = [
   '#5865F2',
@@ -223,6 +275,31 @@ const DECORATIONS = [
   { id: 'emerald-pulse', label: 'Esmeralda' }
 ];
 
+const NAMEPLATES = [
+  { id: 'none', label: 'Padrão' },
+  { id: 'aurora-purple', label: 'Aurora Roxa' },
+  { id: 'crimson-ember', label: 'Brasa Carmesim' },
+  { id: 'cyber-cyan', label: 'Cyber Ciano' },
+  { id: 'emerald-matrix', label: 'Esmeralda' },
+  { id: 'golden-sunset', label: 'Ouro Solar' }
+];
+
+const CLAN_ICONS = ['💀', '🩵', '🔥', '⚡', '👑', '🎮', '💎', '🚀'];
+
+export const PROFILE_BADGES = [
+  { id: 'nitro', icon: '🚀', label: 'Nitro' },
+  { id: 'gamer', icon: '🎮', label: 'Gamer' },
+  { id: 'boost', icon: '💎', label: 'Booster' },
+  { id: 'dev', icon: '⚡', label: 'Dev' },
+  { id: 'vip', icon: '👑', label: 'VIP' },
+  { id: 'verified', icon: '🛡️', label: 'Verificado' }
+];
+
+function parseBadges(raw) {
+  if (Array.isArray(raw)) return raw;
+  try { return JSON.parse(raw || '[]'); } catch { return []; }
+}
+
 export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }) {
   const [displayName, setDisplayName] = useState(user.display_name || '');
   const [pronouns, setPronouns] = useState(user.pronouns || '');
@@ -232,24 +309,36 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
   const [avatarColor, setAvatarColor] = useState(user.avatar_color || '#5865F2');
   const [avatarUrl, setAvatarUrl] = useState(user.avatar_url || '');
   const [bannerColor, setBannerColor] = useState(user.banner_color || '#5865F2');
+  const [bannerUrl, setBannerUrl] = useState(user.banner_url || '');
   const [avatarDecoration, setAvatarDecoration] = useState(user.avatar_decoration || 'none');
+  const [nameColor, setNameColor] = useState(user.name_color || '#f2f3f5');
+  const [nameplateStyle, setNameplateStyle] = useState(user.nameplate_style || 'none');
+  const [clanTag, setClanTag] = useState(user.clan_tag || '');
+  const [clanIcon, setClanIcon] = useState(user.clan_icon || '💀');
+  const [badges, setBadges] = useState(() => parseBadges(user.badges_json));
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef(null);
+  const avatarFileRef = useRef(null);
+  const bannerFileRef = useRef(null);
 
-  async function handleAvatarChange(e) {
+  async function handleUpload(e, target) {
     const file = e.target.files?.[0];
     if (!file || !onUploadAvatar) return;
     setUploading(true);
     try {
       const uploaded = await onUploadAvatar(file);
-      setAvatarUrl(uploaded.url);
+      if (target === 'avatar') setAvatarUrl(uploaded.url);
+      else setBannerUrl(uploaded.url);
     } catch (err) {
       alert(err.message);
     } finally {
       setUploading(false);
       e.target.value = '';
     }
+  }
+
+  function toggleBadge(id) {
+    setBadges(prev => (prev.includes(id) ? prev.filter(b => b !== id) : [...prev, id]));
   }
 
   async function handleSave(e) {
@@ -265,7 +354,13 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
         avatar_color: avatarColor,
         avatar_url: avatarUrl || null,
         banner_color: bannerColor,
-        avatar_decoration: avatarDecoration
+        banner_url: bannerUrl || null,
+        avatar_decoration: avatarDecoration,
+        name_color: nameColor,
+        nameplate_style: nameplateStyle,
+        clan_tag: clanTag.trim().slice(0, 6).toUpperCase(),
+        clan_icon: clanIcon,
+        badges_json: JSON.stringify(badges)
       });
       onClose();
     } finally {
@@ -275,16 +370,19 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card wide" onClick={e => e.stopPropagation()}>
+      <div className="modal-card wide" style={{ maxHeight: '92vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Personalizar Perfil</h2>
+          <h2>Personalizar Perfil (Estilo Nitro)</h2>
           <button className="icon-btn" onClick={onClose}><X size={18} /></button>
         </div>
 
         <form onSubmit={handleSave} className="auth-form">
-          {/* Live Discord-style Profile Card Preview */}
-          <div className="profile-card-preview">
-            <div className="profile-banner" style={{ background: bannerColor }} />
+          {/* Live Discord Nitro Profile Card Preview */}
+          <div className={`profile-card-preview nameplate-${nameplateStyle}`}>
+            <div
+              className="profile-banner"
+              style={bannerUrl ? { backgroundImage: `url(${resolveAssetUrl(bannerUrl)})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: bannerColor }}
+            />
             <div className="profile-card-body">
               <div className="profile-avatar-row">
                 <div className={`avatar xl deco-${avatarDecoration}`} style={{ background: avatarColor }}>
@@ -295,27 +393,32 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
                   )}
                   <span className={`status-dot ${status}`} />
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleAvatarChange} />
-                  <button
-                    type="button"
-                    className="btn-primary xs"
-                    disabled={uploading}
-                    onClick={() => fileRef.current?.click()}
-                  >
-                    <Upload size={13} /> {uploading ? 'Enviando...' : 'Foto / GIF'}
-                  </button>
-                  {avatarUrl && (
-                    <button type="button" className="btn-ghost xs" onClick={() => setAvatarUrl('')}>
-                      Remover
-                    </button>
+                {customStatus && (
+                  <div className="thought-bubble">{customStatus}</div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                <input ref={avatarFileRef} type="file" accept="image/*" hidden onChange={e => handleUpload(e, 'avatar')} />
+                <input ref={bannerFileRef} type="file" accept="image/*" hidden onChange={e => handleUpload(e, 'banner')} />
+                <button type="button" className="btn-primary xs" disabled={uploading} onClick={() => avatarFileRef.current?.click()}>
+                  <Upload size={13} /> Avatar (Foto/GIF)
+                </button>
+                <button type="button" className="btn-primary xs" disabled={uploading} onClick={() => bannerFileRef.current?.click()}>
+                  <Upload size={13} /> Banner (Foto/GIF)
+                </button>
+                {avatarUrl && <button type="button" className="btn-ghost xs" onClick={() => setAvatarUrl('')}>Tirar Avatar</button>}
+                {bannerUrl && <button type="button" className="btn-ghost xs" onClick={() => setBannerUrl('')}>Tirar Banner</button>}
+              </div>
+
+              <div className="profile-preview-names">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <strong style={{ color: nameColor }}>{displayName || user.username}</strong>
+                  {clanTag && (
+                    <span className="clan-tag-pill">{clanIcon} {clanTag}</span>
                   )}
                 </div>
-              </div>
-              <div className="profile-preview-names">
-                <strong>{displayName || user.username}</strong>
                 <span>@{user.username} {pronouns ? `• ${pronouns}` : ''}</span>
-                {customStatus && <small className="profile-custom-status">{customStatus}</small>}
               </div>
             </div>
           </div>
@@ -326,7 +429,7 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
               <input value={displayName} onChange={e => setDisplayName(e.target.value)} required />
             </label>
             <label>
-              <span>PRONOMES (OPCIONAL)</span>
+              <span>PRONOMES / SUBTÍTULO</span>
               <input value={pronouns} onChange={e => setPronouns(e.target.value)} placeholder="ex: ele/dele" />
             </label>
           </div>
@@ -342,14 +445,57 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
               </select>
             </label>
             <label>
-              <span>STATUS PERSONALIZADO</span>
+              <span>BALÃO DE STATUS</span>
               <input
                 value={customStatus}
                 onChange={e => setCustomStatus(e.target.value)}
-                placeholder="ex: Jogando Valorant..."
+                placeholder="ex: www.ronncord.com"
               />
             </label>
           </div>
+
+          <div className="profile-grid-2">
+            <label>
+              <span>TAG DO CLÃ (ATÉ 4-6 LETRAS)</span>
+              <input
+                maxLength={6}
+                value={clanTag}
+                onChange={e => setClanTag(e.target.value.toUpperCase())}
+                placeholder="ex: 0DAY, QSR, LOGI"
+              />
+            </label>
+            <label>
+              <span>ÍCONE DA TAG</span>
+              <div className="deco-picker">
+                {CLAN_ICONS.map(ic => (
+                  <button
+                    key={ic}
+                    type="button"
+                    className={`deco-chip ${clanIcon === ic ? 'active' : ''}`}
+                    onClick={() => setClanIcon(ic)}
+                  >
+                    {ic}
+                  </button>
+                ))}
+              </div>
+            </label>
+          </div>
+
+          <label>
+            <span>PLACA DE FUNDO (NAMEPLATE NA LISTA DE MEMBROS)</span>
+            <div className="deco-picker">
+              {NAMEPLATES.map(np => (
+                <button
+                  key={np.id}
+                  type="button"
+                  className={`deco-chip ${nameplateStyle === np.id ? 'active' : ''}`}
+                  onClick={() => setNameplateStyle(np.id)}
+                >
+                  {np.label}
+                </button>
+              ))}
+            </div>
+          </label>
 
           <label>
             <span><Sparkles size={12} style={{ display: 'inline', marginRight: 4 }} />MOLDURA DO AVATAR</span>
@@ -368,34 +514,51 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
           </label>
 
           <label>
-            <span>BANNER DO PERFIL</span>
-            <div className="color-picker">
-              {BANNERS.map(b => (
+            <span>INSÍGNIAS DO PERFIL</span>
+            <div className="deco-picker">
+              {PROFILE_BADGES.map(b => (
                 <button
-                  key={b}
+                  key={b.id}
                   type="button"
-                  className={`color-swatch ${bannerColor === b ? 'active' : ''}`}
-                  style={{ background: b }}
-                  onClick={() => setBannerColor(b)}
-                />
+                  className={`deco-chip ${badges.includes(b.id) ? 'active' : ''}`}
+                  onClick={() => toggleBadge(b.id)}
+                >
+                  {b.icon} {b.label}
+                </button>
               ))}
             </div>
           </label>
 
-          <label>
-            <span>COR DO AVATAR (SEM FOTO)</span>
-            <div className="color-picker">
-              {COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  className={`color-swatch ${avatarColor === c ? 'active' : ''}`}
-                  style={{ background: c }}
-                  onClick={() => setAvatarColor(c)}
-                />
-              ))}
-            </div>
-          </label>
+          <div className="profile-grid-2">
+            <label>
+              <span>COR DO NOME</span>
+              <div className="color-picker">
+                {COLORS.map(c => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`color-swatch ${nameColor === c ? 'active' : ''}`}
+                    style={{ background: c }}
+                    onClick={() => setNameColor(c)}
+                  />
+                ))}
+              </div>
+            </label>
+            <label>
+              <span>BANNER GRADIENTE</span>
+              <div className="color-picker">
+                {BANNERS.map(b => (
+                  <button
+                    key={b}
+                    type="button"
+                    className={`color-swatch ${bannerColor === b ? 'active' : ''}`}
+                    style={{ background: b }}
+                    onClick={() => setBannerColor(b)}
+                  />
+                ))}
+              </div>
+            </label>
+          </div>
 
           <label>
             <span>SOBRE MIM (BIO)</span>
@@ -403,7 +566,7 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
               rows={2}
               value={bio}
               onChange={e => setBio(e.target.value)}
-              placeholder="Conte um pouco sobre você..."
+              placeholder="Links, bio, descrição..."
             />
           </label>
 
@@ -422,13 +585,33 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
   );
 }
 
-export function UserProfileModal({ member, currentUserId, onClose, onSendDM }) {
+export function UserProfileModal({ member, currentUserId, onClose, onSendDM, onQuickDmMessage }) {
+  const [quickMsg, setQuickMsg] = useState('');
   if (!member) return null;
+  const userBadges = parseBadges(member.badges_json);
+
+  async function handleQuickSend(e) {
+    e.preventDefault();
+    if (!quickMsg.trim()) return;
+    if (onQuickDmMessage) {
+      await onQuickDmMessage(member.id, quickMsg.trim());
+    } else {
+      onSendDM(member.id);
+    }
+    setQuickMsg('');
+    onClose();
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" style={{ padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
-        <div className="profile-banner" style={{ background: member.banner_color || '#5865F2', height: 96 }} />
-        <div className="profile-card-body" style={{ padding: '0 20px 20px' }}>
+      <div className={`modal-card popout nameplate-${member.nameplate_style || 'none'}`} style={{ padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+        <div
+          className="profile-banner"
+          style={member.banner_url
+            ? { height: 112, backgroundImage: `url(${resolveAssetUrl(member.banner_url)})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+            : { height: 112, background: member.banner_color || '#5865F2' }}
+        />
+        <div className="profile-card-body" style={{ padding: '0 18px 18px' }}>
           <div className="profile-avatar-row">
             <div
               className={`avatar xl deco-${member.avatar_decoration || 'none'}`}
@@ -441,26 +624,53 @@ export function UserProfileModal({ member, currentUserId, onClose, onSendDM }) {
               )}
               <span className={`status-dot ${member.status || 'offline'}`} />
             </div>
-            {member.id !== currentUserId && (
-              <button
-                type="button"
-                className="btn-primary xs"
-                onClick={() => { onSendDM(member.id); onClose(); }}
-              >
-                <MessageSquare size={14} /> Enviar Mensagem
-              </button>
+            {member.custom_status && (
+              <div className="thought-bubble">{member.custom_status}</div>
             )}
           </div>
-          <div className="profile-preview-names" style={{ marginBottom: 12 }}>
-            <strong style={{ fontSize: 19 }}>{member.display_name}</strong>
+
+          <div className="profile-preview-names" style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 19, color: member.name_color || '#f2f3f5' }}>{member.display_name}</strong>
+              {member.clan_tag && (
+                <span className="clan-tag-pill">{member.clan_icon || '💀'} {member.clan_tag}</span>
+              )}
+            </div>
             <span>@{member.username} {member.pronouns ? `• ${member.pronouns}` : ''}</span>
-            {member.custom_status && <small className="profile-custom-status">{member.custom_status}</small>}
           </div>
+
+          {userBadges.length > 0 && (
+            <div className="badges-bar">
+              {PROFILE_BADGES.filter(b => userBadges.includes(b.id)).map(b => (
+                <span key={b.id} className="badge-icon-pill" title={b.label}>{b.icon}</span>
+              ))}
+            </div>
+          )}
+
           {member.bio && (
-            <div className="profile-bio-box">
+            <div className="profile-bio-box" style={{ marginBottom: 10 }}>
               <span>SOBRE MIM</span>
               <p>{member.bio}</p>
             </div>
+          )}
+
+          {member.role && (
+            <div className="roles-bar">
+              <span className="role-pill"><i /> {member.role.toUpperCase()}</span>
+            </div>
+          )}
+
+          {member.id !== currentUserId && (
+            <form onSubmit={handleQuickSend} className="quick-dm-form">
+              <input
+                value={quickMsg}
+                onChange={e => setQuickMsg(e.target.value)}
+                placeholder={`Conversar com @${member.username}...`}
+              />
+              <button type="button" className="icon-btn xs" title="Abrir DM" onClick={() => { onSendDM(member.id); onClose(); }}>
+                <MessageSquare size={15} />
+              </button>
+            </form>
           )}
         </div>
       </div>
