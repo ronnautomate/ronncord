@@ -7,6 +7,7 @@ export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer,
   const [name, setName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [templateInput, setTemplateInput] = useState('');
+  const [customJson, setCustomJson] = useState('');
   const [preset, setPreset] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,7 +22,7 @@ export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer,
       } else if (tab === 'join') {
         await onJoinServer(inviteCode);
       } else {
-        await onImportDiscord({ templateInput, preset, customName: name });
+        await onImportDiscord({ templateInput, preset, customJson, customName: name });
       }
       onClose();
     } catch (err) {
@@ -108,6 +109,16 @@ export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer,
                     </button>
                   ))}
                 </div>
+              </label>
+
+              <label>
+                <span>OU COLE UM JSON EXPORTADO</span>
+                <textarea
+                  rows={2}
+                  value={customJson}
+                  onChange={e => { setCustomJson(e.target.value); if (e.target.value) { setPreset(''); setTemplateInput(''); } }}
+                  placeholder='{"name":"Meu Server","channels":[{"category":"GERAL","name":"chat","type":"text"}]}'
+                />
               </label>
 
               <label>
@@ -225,11 +236,23 @@ export function CreateChannelModal({ defaultType = 'text', onClose, onCreate }) 
 
 export function InviteModal({ server, onClose }) {
   const [copied, setCopied] = useState(false);
+  const [exported, setExported] = useState(false);
 
   function copyCode() {
     navigator.clipboard?.writeText(server.invite_code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function exportServerJson() {
+    try {
+      const data = await apiFetch(`/api/servers/${server.id}/export`);
+      navigator.clipboard?.writeText(JSON.stringify(data, null, 2));
+      setExported(true);
+      setTimeout(() => setExported(false), 2500);
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   return (
@@ -242,10 +265,17 @@ export function InviteModal({ server, onClose }) {
         <p className="modal-subtitle">
           Compartilhe este código de convite permanente com quem você quiser trazer para o servidor:
         </p>
-        <div className="invite-box">
+        <div className="invite-box" style={{ marginBottom: 14 }}>
           <code>{server.invite_code}</code>
           <button type="button" className="btn-primary" onClick={copyCode}>
             {copied ? <><Check size={15} /> Copiado</> : <><Copy size={15} /> Copiar</>}
+          </button>
+        </div>
+
+        <div style={{ borderTop: '1px solid #3f4147', paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <small style={{ color: 'var(--text-muted)' }}>Exportar canais para clonar depois</small>
+          <button type="button" className="btn-ghost xs" onClick={exportServerJson}>
+            {exported ? <><Check size={14} /> JSON Copiado!</> : <><Copy size={14} /> Exportar Servidor (JSON)</>}
           </button>
         </div>
       </div>
@@ -310,6 +340,7 @@ function parseBadges(raw) {
 }
 
 export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }) {
+  const [activeTab, setActiveTab] = useState('basic'); // 'basic' | 'visual' | 'clan'
   const [displayName, setDisplayName] = useState(user.display_name || '');
   const [pronouns, setPronouns] = useState(user.pronouns || '');
   const [customStatus, setCustomStatus] = useState(user.custom_status || '');
@@ -382,9 +413,14 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card wide" style={{ maxHeight: '92vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+      {profileEffect !== 'none' && (
+        <div key={`bg-${effectReplayKey}`} className={`fullscreen-fx-overlay effect-${profileEffect}`} aria-hidden="true">
+          <div className="profile-fx-overlay" />
+        </div>
+      )}
+      <div className="modal-card wide" style={{ maxHeight: '90vh', overflowY: 'auto', position: 'relative', zIndex: 2 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Personalizar Perfil (Estilo Nitro)</h2>
+          <h2>Personalizar Perfil</h2>
           <button className="icon-btn" onClick={onClose}><X size={18} /></button>
         </div>
 
@@ -414,19 +450,6 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-                <input ref={avatarFileRef} type="file" accept="image/*" hidden onChange={e => handleUpload(e, 'avatar')} />
-                <input ref={bannerFileRef} type="file" accept="image/*" hidden onChange={e => handleUpload(e, 'banner')} />
-                <button type="button" className="btn-primary xs" disabled={uploading} onClick={() => avatarFileRef.current?.click()}>
-                  <Upload size={13} /> Avatar (Foto/GIF)
-                </button>
-                <button type="button" className="btn-primary xs" disabled={uploading} onClick={() => bannerFileRef.current?.click()}>
-                  <Upload size={13} /> Banner (Foto/GIF)
-                </button>
-                {avatarUrl && <button type="button" className="btn-ghost xs" onClick={() => setAvatarUrl('')}>Tirar Avatar</button>}
-                {bannerUrl && <button type="button" className="btn-ghost xs" onClick={() => setBannerUrl('')}>Tirar Banner</button>}
-              </div>
-
               <div className="profile-preview-names">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <strong style={{ color: nameColor }}>{displayName || user.username}</strong>
@@ -439,171 +462,208 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
             </div>
           </div>
 
-          <div className="profile-grid-2">
-            <label>
-              <span>NOME DE EXIBIÇÃO</span>
-              <input value={displayName} onChange={e => setDisplayName(e.target.value)} required />
-            </label>
-            <label>
-              <span>PRONOMES / SUBTÍTULO</span>
-              <input value={pronouns} onChange={e => setPronouns(e.target.value)} placeholder="ex: ele/dele" />
-            </label>
+          <div className="auth-tabs" style={{ gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 4 }}>
+            <button type="button" className={activeTab === 'basic' ? 'active' : ''} onClick={() => setActiveTab('basic')}>
+              Perfil
+            </button>
+            <button type="button" className={activeTab === 'visual' ? 'active' : ''} onClick={() => setActiveTab('visual')}>
+              Efeitos & Visual
+            </button>
+            <button type="button" className={activeTab === 'clan' ? 'active' : ''} onClick={() => setActiveTab('clan')}>
+              Clã & Insígnias
+            </button>
           </div>
 
-          <div className="profile-grid-2">
-            <label>
-              <span>STATUS</span>
-              <select value={status} onChange={e => setStatus(e.target.value)}>
-                <option value="online">🟢 Online</option>
-                <option value="idle">🟡 Ausente</option>
-                <option value="dnd">🔴 Não Perturbe</option>
-                <option value="offline">⚫ Invisível</option>
-              </select>
-            </label>
-            <label>
-              <span>BALÃO DE STATUS</span>
-              <input
-                value={customStatus}
-                onChange={e => setCustomStatus(e.target.value)}
-                placeholder="ex: www.ronncord.com"
-              />
-            </label>
-          </div>
-
-          <div className="profile-grid-2">
-            <label>
-              <span>TAG DO CLÃ (ATÉ 4-6 LETRAS)</span>
-              <input
-                maxLength={6}
-                value={clanTag}
-                onChange={e => setClanTag(e.target.value.toUpperCase())}
-                placeholder="ex: 0DAY, QSR, LOGI"
-              />
-            </label>
-            <label>
-              <span>ÍCONE DA TAG</span>
-              <div className="deco-picker">
-                {CLAN_ICONS.map(ic => (
-                  <button
-                    key={ic}
-                    type="button"
-                    className={`deco-chip ${clanIcon === ic ? 'active' : ''}`}
-                    onClick={() => setClanIcon(ic)}
-                  >
-                    {ic}
-                  </button>
-                ))}
+          {activeTab === 'basic' && (
+            <>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <input ref={avatarFileRef} type="file" accept="image/*" hidden onChange={e => handleUpload(e, 'avatar')} />
+                <input ref={bannerFileRef} type="file" accept="image/*" hidden onChange={e => handleUpload(e, 'banner')} />
+                <button type="button" className="btn-primary xs" disabled={uploading} onClick={() => avatarFileRef.current?.click()}>
+                  <Upload size={13} /> Avatar (Foto/GIF)
+                </button>
+                <button type="button" className="btn-primary xs" disabled={uploading} onClick={() => bannerFileRef.current?.click()}>
+                  <Upload size={13} /> Banner (Foto/GIF)
+                </button>
+                {avatarUrl && <button type="button" className="btn-ghost xs" onClick={() => setAvatarUrl('')}>Tirar Avatar</button>}
+                {bannerUrl && <button type="button" className="btn-ghost xs" onClick={() => setBannerUrl('')}>Tirar Banner</button>}
               </div>
-            </label>
-          </div>
 
-          <label>
-            <span>✨ EFEITO DE ENTRADA & TEMA DO PERFIL</span>
-            <div className="deco-picker">
-              {PROFILE_EFFECTS.map(fx => (
-                <button
-                  key={fx.id}
-                  type="button"
-                  className={`deco-chip ${profileEffect === fx.id ? 'active' : ''}`}
-                  onClick={() => {
-                    setProfileEffect(fx.id);
-                    setEffectReplayKey(k => k + 1);
-                  }}
-                >
-                  {fx.label}
-                </button>
-              ))}
-            </div>
-          </label>
+              <div className="profile-grid-2">
+                <label>
+                  <span>NOME DE EXIBIÇÃO</span>
+                  <input value={displayName} onChange={e => setDisplayName(e.target.value)} required />
+                </label>
+                <label>
+                  <span>PRONOMES / SUBTÍTULO</span>
+                  <input value={pronouns} onChange={e => setPronouns(e.target.value)} placeholder="ex: ele/dele" />
+                </label>
+              </div>
 
-          <label>
-            <span>PLACA DE FUNDO (NAMEPLATE NA LISTA DE MEMBROS)</span>
-            <div className="deco-picker">
-              {NAMEPLATES.map(np => (
-                <button
-                  key={np.id}
-                  type="button"
-                  className={`deco-chip ${nameplateStyle === np.id ? 'active' : ''}`}
-                  onClick={() => setNameplateStyle(np.id)}
-                >
-                  {np.label}
-                </button>
-              ))}
-            </div>
-          </label>
-
-          <label>
-            <span><Sparkles size={12} style={{ display: 'inline', marginRight: 4 }} />MOLDURA DO AVATAR</span>
-            <div className="deco-picker">
-              {DECORATIONS.map(d => (
-                <button
-                  key={d.id}
-                  type="button"
-                  className={`deco-chip ${avatarDecoration === d.id ? 'active' : ''}`}
-                  onClick={() => setAvatarDecoration(d.id)}
-                >
-                  {d.label}
-                </button>
-              ))}
-            </div>
-          </label>
-
-          <label>
-            <span>INSÍGNIAS DO PERFIL</span>
-            <div className="deco-picker">
-              {PROFILE_BADGES.map(b => (
-                <button
-                  key={b.id}
-                  type="button"
-                  className={`deco-chip ${badges.includes(b.id) ? 'active' : ''}`}
-                  onClick={() => toggleBadge(b.id)}
-                >
-                  {b.icon} {b.label}
-                </button>
-              ))}
-            </div>
-          </label>
-
-          <div className="profile-grid-2">
-            <label>
-              <span>COR DO NOME</span>
-              <div className="color-picker">
-                {COLORS.map(c => (
-                  <button
-                    key={c}
-                    type="button"
-                    className={`color-swatch ${nameColor === c ? 'active' : ''}`}
-                    style={{ background: c }}
-                    onClick={() => setNameColor(c)}
+              <div className="profile-grid-2">
+                <label>
+                  <span>STATUS</span>
+                  <select value={status} onChange={e => setStatus(e.target.value)}>
+                    <option value="online">🟢 Online</option>
+                    <option value="idle">🟡 Ausente</option>
+                    <option value="dnd">🔴 Não Perturbe</option>
+                    <option value="offline">⚫ Invisível</option>
+                  </select>
+                </label>
+                <label>
+                  <span>BALÃO DE STATUS</span>
+                  <input
+                    value={customStatus}
+                    onChange={e => setCustomStatus(e.target.value)}
+                    placeholder="ex: www.ronncord.com"
                   />
-                ))}
+                </label>
               </div>
-            </label>
-            <label>
-              <span>BANNER GRADIENTE</span>
-              <div className="color-picker">
-                {BANNERS.map(b => (
-                  <button
-                    key={b}
-                    type="button"
-                    className={`color-swatch ${bannerColor === b ? 'active' : ''}`}
-                    style={{ background: b }}
-                    onClick={() => setBannerColor(b)}
-                  />
-                ))}
-              </div>
-            </label>
-          </div>
 
-          <label>
-            <span>SOBRE MIM (BIO)</span>
-            <textarea
-              rows={2}
-              value={bio}
-              onChange={e => setBio(e.target.value)}
-              placeholder="Links, bio, descrição..."
-            />
-          </label>
+              <label>
+                <span>SOBRE MIM (BIO)</span>
+                <textarea
+                  rows={2}
+                  value={bio}
+                  onChange={e => setBio(e.target.value)}
+                  placeholder="Links, bio, descrição..."
+                />
+              </label>
+            </>
+          )}
+
+          {activeTab === 'visual' && (
+            <>
+              <label>
+                <span>✨ EFEITO DE ENTRADA NA TELA TODA</span>
+                <div className="deco-picker">
+                  {PROFILE_EFFECTS.map(fx => (
+                    <button
+                      key={fx.id}
+                      type="button"
+                      className={`deco-chip ${profileEffect === fx.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setProfileEffect(fx.id);
+                        setEffectReplayKey(k => k + 1);
+                      }}
+                    >
+                      {fx.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+
+              <label>
+                <span>PLACA DE FUNDO (NAMEPLATE)</span>
+                <div className="deco-picker">
+                  {NAMEPLATES.map(np => (
+                    <button
+                      key={np.id}
+                      type="button"
+                      className={`deco-chip ${nameplateStyle === np.id ? 'active' : ''}`}
+                      onClick={() => setNameplateStyle(np.id)}
+                    >
+                      {np.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+
+              <label>
+                <span><Sparkles size={12} style={{ display: 'inline', marginRight: 4 }} />MOLDURA DO AVATAR</span>
+                <div className="deco-picker">
+                  {DECORATIONS.map(d => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      className={`deco-chip ${avatarDecoration === d.id ? 'active' : ''}`}
+                      onClick={() => setAvatarDecoration(d.id)}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+
+              <div className="profile-grid-2">
+                <label>
+                  <span>COR DO NOME</span>
+                  <div className="color-picker">
+                    {COLORS.map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        className={`color-swatch ${nameColor === c ? 'active' : ''}`}
+                        style={{ background: c }}
+                        onClick={() => setNameColor(c)}
+                      />
+                    ))}
+                  </div>
+                </label>
+                <label>
+                  <span>BANNER GRADIENTE</span>
+                  <div className="color-picker">
+                    {BANNERS.map(b => (
+                      <button
+                        key={b}
+                        type="button"
+                        className={`color-swatch ${bannerColor === b ? 'active' : ''}`}
+                        style={{ background: b }}
+                        onClick={() => setBannerColor(b)}
+                      />
+                    ))}
+                  </div>
+                </label>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'clan' && (
+            <>
+              <div className="profile-grid-2">
+                <label>
+                  <span>TAG DO CLÃ (ATÉ 6 LETRAS)</span>
+                  <input
+                    maxLength={6}
+                    value={clanTag}
+                    onChange={e => setClanTag(e.target.value.toUpperCase())}
+                    placeholder="ex: 0DAY, QSR, LOGI"
+                  />
+                </label>
+                <label>
+                  <span>ÍCONE DA TAG</span>
+                  <div className="deco-picker">
+                    {CLAN_ICONS.map(ic => (
+                      <button
+                        key={ic}
+                        type="button"
+                        className={`deco-chip ${clanIcon === ic ? 'active' : ''}`}
+                        onClick={() => setClanIcon(ic)}
+                      >
+                        {ic}
+                      </button>
+                    ))}
+                  </div>
+                </label>
+              </div>
+
+              <label>
+                <span>INSÍGNIAS DO PERFIL</span>
+                <div className="deco-picker">
+                  {PROFILE_BADGES.map(b => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      className={`deco-chip ${badges.includes(b.id) ? 'active' : ''}`}
+                      onClick={() => toggleBadge(b.id)}
+                    >
+                      {b.icon} {b.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+            </>
+          )}
 
           <div className="modal-actions between">
             <button type="button" className="btn-danger" onClick={onLogout}>Sair da Conta</button>
@@ -639,9 +699,14 @@ export function UserProfileModal({ member, currentUserId, onClose, onSendDM, onQ
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
+      {(member.profile_effect && member.profile_effect !== 'none') && (
+        <div className={`fullscreen-fx-overlay effect-${member.profile_effect}`} aria-hidden="true">
+          <div className="profile-fx-overlay" />
+        </div>
+      )}
       <div
         className={`modal-card popout nameplate-${member.nameplate_style || 'none'} effect-${member.profile_effect || 'none'}`}
-        style={{ padding: 0, overflow: 'hidden', position: 'relative' }}
+        style={{ padding: 0, overflow: 'hidden', position: 'relative', zIndex: 2 }}
         onClick={e => e.stopPropagation()}
       >
         {(member.profile_effect && member.profile_effect !== 'none') && (

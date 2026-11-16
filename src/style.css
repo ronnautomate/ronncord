@@ -2081,3 +2081,12 @@ body {
   0% { opacity: 0.35; }
   100% { opacity: 0.85; }
 }
+
+.fullscreen-fx-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.55;
+  border: none !important;
+}

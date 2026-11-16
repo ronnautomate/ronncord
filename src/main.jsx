@@ -167,9 +167,14 @@ function App() {
 
         if (srvData.servers.length > 0) {
           const first = srvData.servers[0];
+          setViewMode('server');
           setActiveServerId(first.id);
           const firstText = first.channels.find(c => c.type === 'text');
           if (firstText) setActiveChannelId(firstText.id);
+        } else {
+          setViewMode('home');
+          setActiveServerId(null);
+          setActiveChannelId(null);
         }
       } catch (err) {
         console.error(err);

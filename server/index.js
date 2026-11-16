@@ -227,13 +227,12 @@ app.post('/api/auth/register', async (req, res) => {
   }
 
   const id = crypto.randomUUID();
-  const hash = await bcrypt.hash(String(password), 10);
+  const hash = await bcrypt.hash(String(password), 12);
   const now = Date.now();
   db.prepare(
     'INSERT INTO users (id, username, display_name, email, password_hash, avatar_color, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(id, cleanUser, String(displayName || cleanUser).trim(), email ? String(email).trim() : null, hash, pickColor(), 'online', now);
 
-  ensureDefaultServerForUser(id);
   const user = sanitizeUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
   const token = signToken(id);
   res.status(201).json({ token, user });
@@ -249,7 +248,6 @@ app.post('/api/auth/login', async (req, res) => {
   if (!ok) return res.status(401).json({ error: 'Credenciais inválidas' });
 
   db.prepare("UPDATE users SET status = 'online' WHERE id = ?").run(user.id);
-  ensureDefaultServerForUser(user.id);
   const fresh = sanitizeUser(db.prepare('SELECT * FROM users WHERE id = ?').get(user.id));
   const token = signToken(user.id);
   res.json({ token, user: fresh });
@@ -403,19 +401,42 @@ const DISCORD_PRESETS = {
   }
 };
 
+app.get('/api/servers/:serverId/export', authMiddleware, (req, res) => {
+  const { serverId } = req.params;
+  const member = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(serverId, req.user.id);
+  if (!member) return res.status(403).json({ error: 'Sem acesso' });
+  const srv = db.prepare('SELECT name FROM servers WHERE id = ?').get(serverId);
+  if (!srv) return res.status(404).json({ error: 'Servidor não encontrado' });
+  const channels = db.prepare('SELECT category, name, type, topic FROM channels WHERE server_id = ? ORDER BY position ASC').all(serverId);
+  res.json({ name: srv.name, channels });
+});
+
 app.post('/api/servers/import-discord', authMiddleware, async (req, res) => {
-  const { templateInput, preset, customName } = req.body || {};
+  const { templateInput, preset, customJson, customName } = req.body || {};
   let serverName = customName ? String(customName).trim() : '';
   let channelsToCreate = [];
 
   try {
-    if (templateInput && String(templateInput).trim()) {
-      const raw = String(templateInput).trim();
-      const match = raw.match(/(?:discord\.new\/|templates\/)?([A-Za-z0-9]{6,20})$/);
-      const code = match ? match[1] : raw;
-      const resp = await fetch(`https://discord.com/api/v9/guilds/templates/${encodeURIComponent(code)}`);
+    if (customJson && String(customJson).trim()) {
+      const parsed = JSON.parse(String(customJson));
+      if (!serverName) serverName = String(parsed.name || 'Servidor Importado').trim();
+      if (Array.isArray(parsed.channels)) {
+        channelsToCreate = parsed.channels.map(ch => ({
+          category: String(ch.category || (ch.type === 'voice' ? 'VOICE CHANNELS' : 'TEXT CHANNELS')),
+          name: String(ch.name || 'canal'),
+          type: ch.type === 'voice' ? 'voice' : 'text',
+          topic: String(ch.topic || '')
+        }));
+      }
+    } else if (templateInput && String(templateInput).trim()) {
+      const cleanRaw = String(templateInput).trim().split('?')[0].replace(/\/+$/, '');
+      const match = cleanRaw.match(/(?:discord\.new\/|template\/|templates\/)?([A-Za-z0-9_-]{4,32})$/i);
+      const code = match ? match[1] : cleanRaw;
+      const resp = await fetch(`https://discord.com/api/v9/guilds/templates/${encodeURIComponent(code)}`, {
+        headers: { 'User-Agent': 'RonncordBot/1.0' }
+      });
       if (!resp.ok) {
-        return res.status(400).json({ error: 'Template do Discord inválido ou privado. Use um link discord.new/CODIGO válido ou escolha um modelo pronto.' });
+        return res.status(400).json({ error: 'Template do Discord inválido ou expirado. Verifique o link (ex: discord.new/CODIGO) ou escolha um modelo pronto.' });
       }
       const tpl = await resp.json();
       const guild = tpl.serialized_source_guild || {};
@@ -441,7 +462,7 @@ app.post('/api/servers/import-discord', authMiddleware, async (req, res) => {
       if (!serverName) serverName = p.name;
       channelsToCreate = p.channels;
     } else {
-      return res.status(400).json({ error: 'Informe um link/código de template do Discord (discord.new/...) ou selecione um modelo.' });
+      return res.status(400).json({ error: 'Cole um link discord.new/CODIGO, um JSON exportado ou selecione um modelo pronto.' });
     }
 
     if (channelsToCreate.length === 0) {
