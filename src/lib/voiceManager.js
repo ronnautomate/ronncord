@@ -237,6 +237,9 @@ export class VoiceManager {
 
   setUserVolume(userId, percent) {
     const clamped = saveUserVolume(userId, percent);
+    if (this.playbackCtx?.state === 'suspended') {
+      this.playbackCtx.resume().catch(() => {});
+    }
     if (this.deafened) return clamped;
     for (const peer of this.peers.values()) {
       if (peer.userId === userId && peer.gainNodes) {
@@ -257,19 +260,22 @@ export class VoiceManager {
     }
 
     for (const [sid, peer] of this.peers.entries()) {
+      let videoSender = null;
       if (videoTrack) {
         this.socket?.emit('webrtc:signal', {
           targetSocketId: sid,
           channelId: this.channelId,
           signal: { type: 'track-meta', trackId: videoTrack.id, streamKind }
         });
-        const sender = peer.pc.addTrack(videoTrack, stream);
-        await tuneVideoSender(sender);
+        videoSender = peer.pc.addTrack(videoTrack, stream);
       }
       if (audioTrack) {
         peer.pc.addTrack(audioTrack, stream);
       }
       await this._renegotiatePeer(sid, peer.pc);
+      if (videoSender) {
+        await tuneVideoSender(videoSender);
+      }
     }
   }
 
@@ -349,25 +355,35 @@ export class VoiceManager {
     if (!this.channelId) return null;
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
-        width: { ideal: 1920, max: 1920 },
-        height: { ideal: 1080, max: 1080 },
-        frameRate: { ideal: 60, max: 60 }
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 60 },
+        cursor: 'always'
       },
       audio: {
-        suppressLocalAudioPlayback: true,
+        suppressLocalAudioPlayback: false,
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false
-      },
-      systemAudio: 'include'
+      }
     });
     this.screenStream = stream;
-    // Resume mic AudioContext immediately in case Windows/Chrome audio service paused it during getDisplayMedia
+    // Resume both mic and playback AudioContexts immediately in case Windows/Chrome paused them
     if (this.pipeline?.context?.state === 'suspended') {
       await this.pipeline.context.resume().catch(() => {});
     }
+    if (this.playbackCtx?.state === 'suspended') {
+      await this.playbackCtx.resume().catch(() => {});
+    }
     const videoTrack = stream.getVideoTracks()[0];
-    if (videoTrack) videoTrack.onended = () => this.stopScreenShare();
+    if (videoTrack) {
+      videoTrack.applyConstraints?.({
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 60 }
+      }).catch(() => {});
+      videoTrack.onended = () => this.stopScreenShare();
+    }
 
     await this._attachVideoStreamToPeers(stream, 'screen');
     this.socket?.emit('voice:state', { channelId: this.channelId, screenSharing: true });

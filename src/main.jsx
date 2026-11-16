@@ -717,9 +717,10 @@ function App() {
                             <div
                               key={p.socketId}
                               className={`voice-user clickable ${p.speaking ? 'speaking' : ''}`}
-                              title={p.userId !== user.id ? 'Clique para ajustar o volume (0% - 200%)' : p.displayName}
-                              onClick={() => {
+                              title={p.userId !== user.id ? 'Botão direito para ajustar o volume (0% - 200%)' : p.displayName}
+                              onContextMenu={e => {
                                 if (p.userId !== user.id) {
+                                  e.preventDefault();
                                   setVolumeTarget(prev => (prev?.userId === p.userId ? null : p));
                                 }
                               }}
