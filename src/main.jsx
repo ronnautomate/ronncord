@@ -17,7 +17,8 @@ import {
   CreateChannelModal,
   InviteModal,
   ProfileModal,
-  UserProfileModal
+  UserProfileModal,
+  NewDmModal
 } from './components/Modals.jsx';
 import { VoiceSettingsModal } from './components/VoiceSettingsModal.jsx';
 import './style.css';
@@ -721,6 +722,9 @@ function App() {
               <div className="sidebar-section">
                 <div className="section-heading">
                   <p className="section-label">MENSAGENS DIRETAS</p>
+                  <button className="icon-btn xs" title="Nova Mensagem Direta" onClick={() => setModal('new-dm')}>
+                    <Plus size={14} />
+                  </button>
                 </div>
                 {dmThreads.map(t => (
                   <div
@@ -880,6 +884,7 @@ function App() {
               <div key={v.id} className="screen-tile">
                 <video
                   autoPlay
+                  muted
                   playsInline
                   ref={el => {
                     if (el && el.srcObject !== v.stream) el.srcObject = v.stream;
@@ -1035,6 +1040,12 @@ function App() {
           onSave={handleSaveProfile}
           onUploadAvatar={handleUploadFile}
           onLogout={handleLogout}
+        />
+      )}
+      {modal === 'new-dm' && (
+        <NewDmModal
+          onClose={() => setModal(null)}
+          onSelectUser={handleOpenDM}
         />
       )}
       {selectedProfile && (

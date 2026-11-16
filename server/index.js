@@ -498,6 +498,25 @@ app.delete('/api/friends/:id', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/users/search', authMiddleware, (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const rows = q
+    ? db.prepare(`
+        SELECT id, username, display_name, avatar_color, avatar_url, status, custom_status
+        FROM users
+        WHERE id != ? AND (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?)
+        LIMIT 20
+      `).all(req.user.id, `%${q}%`, `%${q}%`)
+    : db.prepare(`
+        SELECT id, username, display_name, avatar_color, avatar_url, status, custom_status
+        FROM users
+        WHERE id != ?
+        ORDER BY created_at DESC
+        LIMIT 20
+      `).all(req.user.id);
+  res.json({ users: rows });
+});
+
 app.get('/api/dms', authMiddleware, (req, res) => {
   const threads = db.prepare(`
     SELECT t.*,

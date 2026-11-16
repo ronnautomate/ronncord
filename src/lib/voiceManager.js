@@ -202,8 +202,10 @@ export class VoiceManager {
 
   setDeafened(deafened) {
     this.deafened = deafened;
-    for (const { audioEl } of this.peers.values()) {
-      if (audioEl) audioEl.muted = deafened;
+    for (const { audioEls } of this.peers.values()) {
+      for (const audioEl of audioEls.values()) {
+        audioEl.muted = deafened;
+      }
     }
     if (this.channelId) {
       this.socket?.emit('voice:state', { channelId: this.channelId, deafened });
@@ -212,19 +214,25 @@ export class VoiceManager {
 
   async _attachVideoStreamToPeers(stream, streamKind) {
     const videoTrack = stream.getVideoTracks()[0];
-    if (!videoTrack) return;
-    if ('contentHint' in videoTrack) {
+    const audioTrack = stream.getAudioTracks()[0];
+    if (!videoTrack && !audioTrack) return;
+    if (videoTrack && 'contentHint' in videoTrack) {
       videoTrack.contentHint = 'motion';
     }
 
     for (const [sid, peer] of this.peers.entries()) {
-      this.socket?.emit('webrtc:signal', {
-        targetSocketId: sid,
-        channelId: this.channelId,
-        signal: { type: 'track-meta', trackId: videoTrack.id, streamKind }
-      });
-      const sender = peer.pc.addTrack(videoTrack, stream);
-      await tuneVideoSender(sender);
+      if (videoTrack) {
+        this.socket?.emit('webrtc:signal', {
+          targetSocketId: sid,
+          channelId: this.channelId,
+          signal: { type: 'track-meta', trackId: videoTrack.id, streamKind }
+        });
+        const sender = peer.pc.addTrack(videoTrack, stream);
+        await tuneVideoSender(sender);
+      }
+      if (audioTrack) {
+        peer.pc.addTrack(audioTrack, stream);
+      }
       await this._renegotiatePeer(sid, peer.pc);
     }
   }
@@ -309,11 +317,17 @@ export class VoiceManager {
         height: { ideal: 1080, max: 1080 },
         frameRate: { ideal: 60, max: 60 }
       },
-      audio: true
+      audio: {
+        suppressLocalAudioPlayback: true,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      },
+      systemAudio: 'include'
     });
     this.screenStream = stream;
     const videoTrack = stream.getVideoTracks()[0];
-    videoTrack.onended = () => this.stopScreenShare();
+    if (videoTrack) videoTrack.onended = () => this.stopScreenShare();
 
     await this._attachVideoStreamToPeers(stream, 'screen');
     this.socket?.emit('voice:state', { channelId: this.channelId, screenSharing: true });
@@ -444,6 +458,7 @@ export class VoiceManager {
     }
     if (this.screenStream) {
       const track = this.screenStream.getVideoTracks()[0];
+      const audioTrack = this.screenStream.getAudioTracks()[0];
       if (track) {
         this.socket?.emit('webrtc:signal', {
           targetSocketId,
@@ -452,6 +467,9 @@ export class VoiceManager {
         });
         const sender = pc.addTrack(track, this.screenStream);
         await tuneVideoSender(sender);
+      }
+      if (audioTrack) {
+        pc.addTrack(audioTrack, this.screenStream);
       }
     }
 
@@ -476,12 +494,7 @@ export class VoiceManager {
       return el;
     })();
 
-    const audioEl = document.createElement('audio');
-    audioEl.autoplay = true;
-    audioEl.playsInline = true;
-    audioEl.muted = this.deafened;
-    audioEl.volume = 1.0;
-    audioPool.appendChild(audioEl);
+    const audioEls = new Map();
 
     pc.oniceconnectionstatechange = () => {
       if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
@@ -490,20 +503,39 @@ export class VoiceManager {
     };
 
     pc.ontrack = event => {
-      const remoteStream = event.streams?.[0] || new MediaStream([event.track]);
+      // Zero-delay jitter buffer hint for real-time audio & video
+      if (event.receiver) {
+        try {
+          if ('playoutDelayHint' in event.receiver) event.receiver.playoutDelayHint = 0;
+          if ('jitterBufferTarget' in event.receiver) event.receiver.jitterBufferTarget = 0;
+        } catch {}
+      }
+
       if (event.track.kind === 'audio') {
-        audioEl.srcObject = remoteStream;
-        const tryPlay = () => {
-          audioEl.play().catch(() => {
-            const unlock = () => {
-              audioEl.play().catch(() => {});
-              window.removeEventListener('pointerdown', unlock);
-            };
-            window.addEventListener('pointerdown', unlock, { once: true });
-          });
+        const audioEl = document.createElement('audio');
+        audioEl.autoplay = true;
+        audioEl.playsInline = true;
+        audioEl.muted = this.deafened;
+        audioEl.volume = 1.0;
+        audioEl.srcObject = new MediaStream([event.track]);
+        audioPool.appendChild(audioEl);
+        audioEls.set(event.track.id, audioEl);
+
+        audioEl.play().catch(() => {
+          const unlock = () => {
+            audioEl.play().catch(() => {});
+            window.removeEventListener('pointerdown', unlock);
+          };
+          window.addEventListener('pointerdown', unlock, { once: true });
+        });
+
+        event.track.onended = () => {
+          audioEl.srcObject = null;
+          audioEl.remove();
+          audioEls.delete(event.track.id);
         };
-        tryPlay();
       } else if (event.track.kind === 'video') {
+        const remoteStream = event.streams?.[0] || new MediaStream([event.track]);
         const key = `${targetSocketId}:${event.track.id}`;
         const kind = this.trackMetaMap.get(event.track.id) || 'screen';
         this.remoteVideos.set(key, {
@@ -522,7 +554,7 @@ export class VoiceManager {
       }
     };
 
-    this.peers.set(targetSocketId, { pc, audioEl, displayName, pendingCandidates: [] });
+    this.peers.set(targetSocketId, { pc, audioEls, displayName, pendingCandidates: [] });
     return pc;
   }
 
@@ -530,9 +562,12 @@ export class VoiceManager {
     const peer = this.peers.get(socketId);
     if (!peer) return;
     try { peer.pc.close(); } catch {}
-    if (peer.audioEl) {
-      peer.audioEl.srcObject = null;
-      peer.audioEl.remove();
+    if (peer.audioEls) {
+      for (const audioEl of peer.audioEls.values()) {
+        audioEl.srcObject = null;
+        audioEl.remove();
+      }
+      peer.audioEls.clear();
     }
     this.peers.delete(socketId);
     let changed = false;

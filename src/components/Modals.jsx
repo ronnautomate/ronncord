@@ -1,6 +1,6 @@
-import React, { useRef, useState } from 'react';
-import { X, Copy, Check, Hash, Volume2, Upload, Sparkles, MessageSquare } from 'lucide-react';
-import { resolveAssetUrl } from '../lib/api.js';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Copy, Check, Hash, Volume2, Upload, Sparkles, MessageSquare, Search } from 'lucide-react';
+import { apiFetch, resolveAssetUrl } from '../lib/api.js';
 
 export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer }) {
   const [tab, setTab] = useState('create');
@@ -461,6 +461,76 @@ export function UserProfileModal({ member, currentUserId, onClose, onSendDM }) {
               <span>SOBRE MIM</span>
               <p>{member.bio}</p>
             </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function NewDmModal({ onClose, onSelectUser }) {
+  const [query, setQuery] = useState('');
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    apiFetch(`/api/users/search?q=${encodeURIComponent(query)}`)
+      .then(d => { if (active) setUsers(d.users || []); })
+      .catch(() => { if (active) setUsers([]); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [query]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Nova Mensagem Direta (DM)</h2>
+          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div className="gif-search-bar" style={{ marginBottom: 12 }}>
+          <Search size={14} />
+          <input
+            autoFocus
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Buscar usuário por @username ou nome..."
+          />
+        </div>
+
+        <div style={{ maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {loading ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 16 }}>Buscando...</p>
+          ) : users.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 16 }}>Nenhum usuário encontrado.</p>
+          ) : (
+            users.map(u => (
+              <button
+                key={u.id}
+                type="button"
+                className="channel"
+                style={{ width: '100%', justifyContent: 'space-between', border: 'none', background: 'var(--bg-sidebar)' }}
+                onClick={() => { onSelectUser(u.id); onClose(); }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div className="avatar xs" style={{ background: u.avatar_color }}>
+                    {u.avatar_url ? (
+                      <img src={resolveAssetUrl(u.avatar_url)} alt={u.display_name} className="avatar-img" />
+                    ) : (
+                      (u.display_name || u.username)[0].toUpperCase()
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'left' }}>
+                    <strong style={{ display: 'block', color: 'var(--text)', fontSize: 13 }}>{u.display_name}</strong>
+                    <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>@{u.username}</small>
+                  </div>
+                </div>
+                <MessageSquare size={15} />
+              </button>
+            ))
           )}
         </div>
       </div>
