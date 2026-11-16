@@ -60,6 +60,17 @@ function tuneOpusSdp(sdp) {
 }
 
 /**
+ * Adds video bitrate hints to SDP so 1080p60 starts crisp immediately without blurry ramp-up
+ */
+function tuneVideoSdp(sdp) {
+  if (!sdp) return sdp;
+  return sdp.replace(
+    /(m=video[^\r\n]*\r\n)/g,
+    '$1b=AS:10000\r\n'
+  );
+}
+
+/**
  * Configures WebRTC video sender for smooth 1080p 60fps streaming (8 Mbps max bitrate)
  */
 async function tuneVideoSender(sender) {
@@ -245,9 +256,10 @@ export class VoiceManager {
   }
 
   async _renegotiatePeer(targetSocketId, pc) {
+    if (pc.signalingState !== 'stable') return;
     try {
       const offer = await pc.createOffer();
-      offer.sdp = tuneOpusSdp(offer.sdp);
+      offer.sdp = tuneVideoSdp(tuneOpusSdp(offer.sdp));
       await pc.setLocalDescription(offer);
       this.socket?.emit('webrtc:signal', {
         targetSocketId,
@@ -357,12 +369,23 @@ export class VoiceManager {
       await this._createPeerConnection(fromSocketId, user?.display_name || 'Usuário');
       peerObj = this.peers.get(fromSocketId);
     }
-    const { pc } = peerObj;
+    const { pc, pendingCandidates } = peerObj;
 
     if (signal.type === 'offer') {
+      // Glare handling: polite peer rolls back if both sent offers simultaneously
+      const polite = this.socket.id < fromSocketId;
+      if (pc.signalingState !== 'stable') {
+        if (!polite) return;
+        await pc.setLocalDescription({ type: 'rollback' });
+      }
       await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+      while (pendingCandidates.length > 0) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(pendingCandidates.shift()));
+        } catch {}
+      }
       const answer = await pc.createAnswer();
-      answer.sdp = tuneOpusSdp(answer.sdp);
+      answer.sdp = tuneVideoSdp(tuneOpusSdp(answer.sdp));
       await pc.setLocalDescription(answer);
       this.socket.emit('webrtc:signal', {
         targetSocketId: fromSocketId,
@@ -370,12 +393,21 @@ export class VoiceManager {
         signal: { type: 'answer', sdp: answer.sdp }
       });
     } else if (signal.type === 'answer') {
-      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+      if (pc.signalingState === 'have-local-offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+        while (pendingCandidates.length > 0) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(pendingCandidates.shift()));
+          } catch {}
+        }
+      }
     } else if (signal.candidate) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-      } catch {
-        // ignore stale ICE
+      if (pc.remoteDescription) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        } catch {}
+      } else {
+        pendingCandidates.push(signal.candidate);
       }
     }
   }
@@ -462,7 +494,7 @@ export class VoiceManager {
       }
     };
 
-    this.peers.set(targetSocketId, { pc, audioEl, displayName });
+    this.peers.set(targetSocketId, { pc, audioEl, displayName, pendingCandidates: [] });
     return pc;
   }
 
