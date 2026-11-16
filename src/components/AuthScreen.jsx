@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Sparkles, WifiOff } from 'lucide-react';
 import { apiFetch, setToken } from '../lib/api.js';
 
-export function AuthScreen({ onAuthSuccess, onEnterDemo }) {
+export function AuthScreen({ onAuthSuccess }) {
   const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -25,7 +24,7 @@ export function AuthScreen({ onAuthSuccess, onEnterDemo }) {
       onAuthSuccess(data.user);
     } catch (err) {
       if (err.message === 'BACKEND_UNAVAILABLE') {
-        setError('Servidor local offline. Inicie o backend (`npm run server`) ou use o Modo Demo abaixo.');
+        setError('Servidor indisponível no momento. Aguarde alguns segundos e tente novamente.');
       } else {
         setError(err.message);
       }
@@ -41,7 +40,7 @@ export function AuthScreen({ onAuthSuccess, onEnterDemo }) {
           <div className="auth-logo">R</div>
           <div>
             <h1>RONNCORD</h1>
-            <p>Sua plataforma de comunicação com API própria e sem limites</p>
+            <p>Conecte-se com seus amigos por voz, vídeo e chat em tempo real</p>
           </div>
         </div>
 
@@ -115,16 +114,6 @@ export function AuthScreen({ onAuthSuccess, onEnterDemo }) {
             {loading ? 'Conectando...' : mode === 'login' ? 'Entrar no RONNCORD' : 'Criar Conta e Entrar'}
           </button>
         </form>
-
-        <div className="auth-footer">
-          <div className="auth-badges">
-            <span><ShieldCheck size={14} /> Auto-hospedado</span>
-            <span><Sparkles size={14} /> API Ilimitada</span>
-          </div>
-          <button type="button" className="btn-ghost" onClick={onEnterDemo}>
-            <WifiOff size={14} /> Testar no Modo Demo Local
-          </button>
-        </div>
       </div>
     </div>
   );
