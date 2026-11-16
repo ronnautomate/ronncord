@@ -465,16 +465,44 @@ export class VoiceManager {
       }
     };
 
-    const audioEl = new Audio();
+    const audioPool = (() => {
+      let el = document.getElementById('ronncord-audio-pool');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'ronncord-audio-pool';
+        el.style.display = 'none';
+        document.body.appendChild(el);
+      }
+      return el;
+    })();
+
+    const audioEl = document.createElement('audio');
     audioEl.autoplay = true;
     audioEl.playsInline = true;
     audioEl.muted = this.deafened;
+    audioEl.volume = 1.0;
+    audioPool.appendChild(audioEl);
+
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+        try { pc.restartIce?.(); } catch {}
+      }
+    };
 
     pc.ontrack = event => {
-      const [remoteStream] = event.streams;
+      const remoteStream = event.streams?.[0] || new MediaStream([event.track]);
       if (event.track.kind === 'audio') {
         audioEl.srcObject = remoteStream;
-        audioEl.play().catch(() => {});
+        const tryPlay = () => {
+          audioEl.play().catch(() => {
+            const unlock = () => {
+              audioEl.play().catch(() => {});
+              window.removeEventListener('pointerdown', unlock);
+            };
+            window.addEventListener('pointerdown', unlock, { once: true });
+          });
+        };
+        tryPlay();
       } else if (event.track.kind === 'video') {
         const key = `${targetSocketId}:${event.track.id}`;
         const kind = this.trackMetaMap.get(event.track.id) || 'screen';
@@ -504,6 +532,7 @@ export class VoiceManager {
     try { peer.pc.close(); } catch {}
     if (peer.audioEl) {
       peer.audioEl.srcObject = null;
+      peer.audioEl.remove();
     }
     this.peers.delete(socketId);
     let changed = false;

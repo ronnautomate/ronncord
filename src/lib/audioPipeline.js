@@ -51,7 +51,7 @@ export function getSavedVoiceSettings() {
   }
   return {
     noiseMode: 'hybrid', // 'hybrid' (RNNoise + GTCRN) | 'gtcrn' | 'rnnoise' | 'off'
-    gateThresholdDb: -38,
+    gateThresholdDb: -54,
     inputDeviceId: 'default',
     outputDeviceId: 'default'
   };
@@ -99,16 +99,16 @@ export async function createProcessedMicPipeline(options = {}) {
 
   const source = ctx.createMediaStreamSource(rawStream);
 
-  // 1a. High-pass filter at 110Hz to cut desk bumps, AC hum, and sub-bass rumble
+  // 1a. High-pass filter at 90Hz to cut desk bumps and AC hum without thinning voice
   const highPass = ctx.createBiquadFilter();
   highPass.type = 'highpass';
-  highPass.frequency.value = 110;
-  highPass.Q.value = 0.8;
+  highPass.frequency.value = 90;
+  highPass.Q.value = 0.707;
 
-  // 1b. Low-pass filter at 7.5kHz to attenuate high-pitched mechanical keyboard clacks
+  // 1b. Low-pass filter at 8.5kHz to attenuate high-pitched mechanical keyboard clacks
   const lowPass = ctx.createBiquadFilter();
   lowPass.type = 'lowpass';
-  lowPass.frequency.value = 7500;
+  lowPass.frequency.value = 8500;
   lowPass.Q.value = 0.707;
 
   source.connect(highPass);
