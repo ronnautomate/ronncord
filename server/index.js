@@ -590,6 +590,7 @@ io.on('connection', (socket) => {
       muted: false,
       deafened: false,
       speaking: false,
+      cameraOn: false,
       screenSharing: false
     });
     socket.join(`voice:${channelId}`);
@@ -599,7 +600,7 @@ io.on('connection', (socket) => {
     io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
   });
 
-  socket.on('voice:state', ({ channelId, muted, deafened, speaking, screenSharing }) => {
+  socket.on('voice:state', ({ channelId, muted, deafened, speaking, cameraOn, screenSharing }) => {
     const room = voiceRooms.get(channelId);
     if (!room || !room.has(socket.id)) return;
     const current = room.get(socket.id);
@@ -608,6 +609,7 @@ io.on('connection', (socket) => {
       ...(muted !== undefined ? { muted } : {}),
       ...(deafened !== undefined ? { deafened } : {}),
       ...(speaking !== undefined ? { speaking } : {}),
+      ...(cameraOn !== undefined ? { cameraOn } : {}),
       ...(screenSharing !== undefined ? { screenSharing } : {})
     };
     room.set(socket.id, updated);

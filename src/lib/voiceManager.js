@@ -59,15 +59,36 @@ function tuneOpusSdp(sdp) {
   return tuned.join('\r\n');
 }
 
+/**
+ * Configures WebRTC video sender for smooth 1080p 60fps streaming (8 Mbps max bitrate)
+ */
+async function tuneVideoSender(sender) {
+  if (!sender || typeof sender.getParameters !== 'function') return;
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) {
+      params.encodings = [{}];
+    }
+    params.encodings[0].maxBitrate = 8_000_000; // 8 Mbps for crisp 1080p60
+    params.encodings[0].maxFramerate = 60;
+    params.degradationPreference = 'maintain-framerate';
+    await sender.setParameters(params);
+  } catch {
+    // Some browsers ignore specific encoding fields
+  }
+}
+
 export class VoiceManager {
   constructor(socket, callbacks = {}) {
     this.socket = socket;
-    this.callbacks = callbacks; // { onPing, onSpeakingChange, onRemoteStreams, onError }
+    this.callbacks = callbacks; // { onPing, onSpeakingChange, onRemoteVideos, onError }
     this.channelId = null;
     this.pipeline = null;
+    this.cameraStream = null;
     this.screenStream = null;
-    this.peers = new Map(); // socketId -> { pc, audioEl, stream, videoTrack }
-    this.remoteScreens = new Map(); // socketId -> { user, stream }
+    this.peers = new Map(); // socketId -> { pc, audioEl, displayName }
+    this.remoteVideos = new Map(); // `${socketId}:${trackId}` -> { id, socketId, trackId, kind, displayName, stream }
+    this.trackMetaMap = new Map(); // trackId -> 'camera' | 'screen'
     this.muted = false;
     this.deafened = false;
     this.pingTimer = null;
@@ -143,6 +164,7 @@ export class VoiceManager {
     if (this.channelId) {
       this.socket?.emit('voice:leave', this.channelId);
     }
+    this.stopCamera();
     this.stopScreenShare();
     for (const socketId of Array.from(this.peers.keys())) {
       this._closePeer(socketId);
@@ -152,7 +174,7 @@ export class VoiceManager {
     this.channelId = null;
     this.lastSpeaking = false;
     this.callbacks.onPing?.(null);
-    this.callbacks.onRemoteStreams?.([]);
+    this.callbacks.onRemoteVideos?.([]);
   }
 
   setMuted(muted) {
@@ -177,48 +199,121 @@ export class VoiceManager {
     }
   }
 
+  async _attachVideoStreamToPeers(stream, streamKind) {
+    const videoTrack = stream.getVideoTracks()[0];
+    if (!videoTrack) return;
+    if ('contentHint' in videoTrack) {
+      videoTrack.contentHint = 'motion';
+    }
+
+    for (const [sid, peer] of this.peers.entries()) {
+      this.socket?.emit('webrtc:signal', {
+        targetSocketId: sid,
+        channelId: this.channelId,
+        signal: { type: 'track-meta', trackId: videoTrack.id, streamKind }
+      });
+      const sender = peer.pc.addTrack(videoTrack, stream);
+      await tuneVideoSender(sender);
+      await this._renegotiatePeer(sid, peer.pc);
+    }
+  }
+
+  async _detachVideoStreamFromPeers(stream) {
+    if (!stream) return;
+    const trackIds = new Set(stream.getTracks().map(t => t.id));
+    for (const [sid, peer] of this.peers.entries()) {
+      let removed = false;
+      for (const sender of peer.pc.getSenders()) {
+        if (sender.track && trackIds.has(sender.track.id)) {
+          try {
+            peer.pc.removeTrack(sender);
+            removed = true;
+          } catch {}
+        }
+      }
+      if (removed) {
+        for (const tid of trackIds) {
+          this.socket?.emit('webrtc:signal', {
+            targetSocketId: sid,
+            channelId: this.channelId,
+            signal: { type: 'track-removed', trackId: tid }
+          });
+        }
+        await this._renegotiatePeer(sid, peer.pc);
+      }
+    }
+  }
+
+  async _renegotiatePeer(targetSocketId, pc) {
+    try {
+      const offer = await pc.createOffer();
+      offer.sdp = tuneOpusSdp(offer.sdp);
+      await pc.setLocalDescription(offer);
+      this.socket?.emit('webrtc:signal', {
+        targetSocketId,
+        channelId: this.channelId,
+        signal: { type: 'offer', sdp: offer.sdp }
+      });
+    } catch {
+      // ignore if peer closed
+    }
+  }
+
+  async startCamera() {
+    if (!this.channelId) return null;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1920, max: 1920 },
+        height: { ideal: 1080, max: 1080 },
+        frameRate: { ideal: 60, max: 60 }
+      },
+      audio: false
+    });
+    this.cameraStream = stream;
+    const videoTrack = stream.getVideoTracks()[0];
+    videoTrack.onended = () => this.stopCamera();
+
+    await this._attachVideoStreamToPeers(stream, 'camera');
+    this.socket?.emit('voice:state', { channelId: this.channelId, cameraOn: true });
+    return stream;
+  }
+
+  async stopCamera() {
+    if (!this.cameraStream) return;
+    const stream = this.cameraStream;
+    this.cameraStream = null;
+    await this._detachVideoStreamFromPeers(stream);
+    stream.getTracks().forEach(t => t.stop());
+    if (this.channelId) {
+      this.socket?.emit('voice:state', { channelId: this.channelId, cameraOn: false });
+    }
+  }
+
   async startScreenShare() {
     if (!this.channelId) return null;
     const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 60, max: 60 }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      video: {
+        width: { ideal: 1920, max: 1920 },
+        height: { ideal: 1080, max: 1080 },
+        frameRate: { ideal: 60, max: 60 }
+      },
       audio: true
     });
     this.screenStream = stream;
     const videoTrack = stream.getVideoTracks()[0];
     videoTrack.onended = () => this.stopScreenShare();
 
-    for (const { pc } of this.peers.values()) {
-      pc.addTrack(videoTrack, stream);
-      const offer = await pc.createOffer();
-      offer.sdp = tuneOpusSdp(offer.sdp);
-      await pc.setLocalDescription(offer);
-      // Renegotiate
-      for (const [sid, p] of this.peers.entries()) {
-        if (p.pc === pc) {
-          this.socket?.emit('webrtc:signal', {
-            targetSocketId: sid,
-            channelId: this.channelId,
-            signal: { type: 'offer', sdp: offer.sdp }
-          });
-        }
-      }
-    }
-
+    await this._attachVideoStreamToPeers(stream, 'screen');
     this.socket?.emit('voice:state', { channelId: this.channelId, screenSharing: true });
     return stream;
   }
 
-  stopScreenShare() {
+  async stopScreenShare() {
     if (!this.screenStream) return;
-    this.screenStream.getTracks().forEach(t => t.stop());
-    for (const { pc } of this.peers.values()) {
-      pc.getSenders().forEach(sender => {
-        if (sender.track?.kind === 'video') {
-          try { pc.removeTrack(sender); } catch {}
-        }
-      });
-    }
+    const stream = this.screenStream;
     this.screenStream = null;
+    await this._detachVideoStreamFromPeers(stream);
+    stream.getTracks().forEach(t => t.stop());
     if (this.channelId) {
       this.socket?.emit('voice:state', { channelId: this.channelId, screenSharing: false });
     }
@@ -228,7 +323,7 @@ export class VoiceManager {
     if (channelId !== this.channelId) return;
     for (const peer of peers) {
       if (peer.socketId === this.socket.id) continue;
-      const pc = this._createPeerConnection(peer.socketId, peer.displayName);
+      const pc = await this._createPeerConnection(peer.socketId, peer.displayName);
       const offer = await pc.createOffer();
       offer.sdp = tuneOpusSdp(offer.sdp);
       await pc.setLocalDescription(offer);
@@ -242,9 +337,24 @@ export class VoiceManager {
 
   async _handleSignal({ fromSocketId, channelId, user, signal }) {
     if (channelId !== this.channelId) return;
+    if (signal.type === 'track-meta') {
+      this.trackMetaMap.set(signal.trackId, signal.streamKind);
+      const existing = this.remoteVideos.get(`${fromSocketId}:${signal.trackId}`);
+      if (existing) {
+        existing.kind = signal.streamKind;
+        this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
+      }
+      return;
+    }
+    if (signal.type === 'track-removed') {
+      this.remoteVideos.delete(`${fromSocketId}:${signal.trackId}`);
+      this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
+      return;
+    }
+
     let peerObj = this.peers.get(fromSocketId);
     if (!peerObj) {
-      this._createPeerConnection(fromSocketId, user?.display_name || 'Usuário');
+      await this._createPeerConnection(fromSocketId, user?.display_name || 'Usuário');
       peerObj = this.peers.get(fromSocketId);
     }
     const { pc } = peerObj;
@@ -280,7 +390,7 @@ export class VoiceManager {
     }
   }
 
-  _createPeerConnection(targetSocketId, displayName) {
+  async _createPeerConnection(targetSocketId, displayName) {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
     if (this.pipeline?.stream) {
@@ -288,10 +398,29 @@ export class VoiceManager {
         pc.addTrack(track, this.pipeline.stream);
       });
     }
+    if (this.cameraStream) {
+      const track = this.cameraStream.getVideoTracks()[0];
+      if (track) {
+        this.socket?.emit('webrtc:signal', {
+          targetSocketId,
+          channelId: this.channelId,
+          signal: { type: 'track-meta', trackId: track.id, streamKind: 'camera' }
+        });
+        const sender = pc.addTrack(track, this.cameraStream);
+        await tuneVideoSender(sender);
+      }
+    }
     if (this.screenStream) {
-      this.screenStream.getVideoTracks().forEach(track => {
-        pc.addTrack(track, this.screenStream);
-      });
+      const track = this.screenStream.getVideoTracks()[0];
+      if (track) {
+        this.socket?.emit('webrtc:signal', {
+          targetSocketId,
+          channelId: this.channelId,
+          signal: { type: 'track-meta', trackId: track.id, streamKind: 'screen' }
+        });
+        const sender = pc.addTrack(track, this.screenStream);
+        await tuneVideoSender(sender);
+      }
     }
 
     pc.onicecandidate = event => {
@@ -315,11 +444,20 @@ export class VoiceManager {
         audioEl.srcObject = remoteStream;
         audioEl.play().catch(() => {});
       } else if (event.track.kind === 'video') {
-        this.remoteScreens.set(targetSocketId, { socketId: targetSocketId, displayName, stream: remoteStream });
-        this.callbacks.onRemoteStreams?.(Array.from(this.remoteScreens.values()));
+        const key = `${targetSocketId}:${event.track.id}`;
+        const kind = this.trackMetaMap.get(event.track.id) || 'screen';
+        this.remoteVideos.set(key, {
+          id: key,
+          socketId: targetSocketId,
+          trackId: event.track.id,
+          kind,
+          displayName,
+          stream: remoteStream
+        });
+        this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
         event.track.onended = () => {
-          this.remoteScreens.delete(targetSocketId);
-          this.callbacks.onRemoteStreams?.(Array.from(this.remoteScreens.values()));
+          this.remoteVideos.delete(key);
+          this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
         };
       }
     };
@@ -336,9 +474,15 @@ export class VoiceManager {
       peer.audioEl.srcObject = null;
     }
     this.peers.delete(socketId);
-    if (this.remoteScreens.has(socketId)) {
-      this.remoteScreens.delete(socketId);
-      this.callbacks.onRemoteStreams?.(Array.from(this.remoteScreens.values()));
+    let changed = false;
+    for (const [key, val] of this.remoteVideos.entries()) {
+      if (val.socketId === socketId) {
+        this.remoteVideos.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
     }
   }
 

@@ -1446,3 +1446,27 @@ body {
   align-items: center;
   gap: 5px;
 }
+
+.video-mirror {
+  transform: scaleX(-1);
+}
+
+.screen-fullscreen-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.screen-tile:hover .screen-fullscreen-btn {
+  opacity: 1;
+}

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import {
   Hash, Volume2, Plus, Settings, Mic, MicOff, Headphones, HeadphoneOff,
   UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff,
-  MonitorUp, MonitorOff, Sliders, Sparkles
+  MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2
 } from 'lucide-react';
 import { apiFetch, connectSocket, getToken, setToken } from './lib/api.js';
 import { VoiceManager } from './lib/voiceManager.js';
@@ -99,8 +99,11 @@ function App() {
   const [voiceParticipants, setVoiceParticipants] = useState({});
   const [voicePing, setVoicePing] = useState(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [remoteScreens, setRemoteScreens] = useState([]);
+  const [localCameraStream, setLocalCameraStream] = useState(null);
+  const [localScreenStream, setLocalScreenStream] = useState(null);
+  const [remoteVideos, setRemoteVideos] = useState([]);
   const [voiceSettings, setVoiceSettings] = useState(getSavedVoiceSettings);
 
   const [showMembers, setShowMembers] = useState(true);
@@ -226,7 +229,7 @@ function App() {
       voiceManagerRef.current = new VoiceManager(socket, {
         onPing: setVoicePing,
         onSpeakingChange: setIsSpeaking,
-        onRemoteStreams: setRemoteScreens,
+        onRemoteVideos: setRemoteVideos,
         onError: msg => alert(msg)
       });
     }
@@ -466,13 +469,16 @@ function App() {
 
   async function toggleVoiceChannel(ch) {
     if (isDemo) {
-      alert('Salas de voz WebRTC com supressão de ruído IA requerem o backend ativo (`npm run server`). Você já pode testar seu microfone no ícone de Configurações de Voz (Sliders)!');
+      alert('Salas de voz, câmera e tela 1080p60 WebRTC requerem o backend ativo (`npm run server`). Você já pode testar seu microfone no ícone de Configurações de Voz (Sliders)!');
       return;
     }
     if (voiceChannelId === ch.id) {
       await voiceManagerRef.current?.leave();
       setVoiceChannelId(null);
+      setIsCameraOn(false);
       setIsScreenSharing(false);
+      setLocalCameraStream(null);
+      setLocalScreenStream(null);
     } else {
       await voiceManagerRef.current?.join(ch.id, voiceSettings);
       voiceManagerRef.current?.setMuted(muted);
@@ -481,15 +487,34 @@ function App() {
     }
   }
 
+  async function toggleCamera() {
+    if (!voiceChannelId) return;
+    if (isCameraOn) {
+      await voiceManagerRef.current?.stopCamera();
+      setIsCameraOn(false);
+      setLocalCameraStream(null);
+    } else {
+      try {
+        const stream = await voiceManagerRef.current?.startCamera();
+        setIsCameraOn(true);
+        setLocalCameraStream(stream || null);
+      } catch (err) {
+        alert('Não foi possível ligar a câmera: ' + err.message);
+      }
+    }
+  }
+
   async function toggleScreenShare() {
     if (!voiceChannelId) return;
     if (isScreenSharing) {
-      voiceManagerRef.current?.stopScreenShare();
+      await voiceManagerRef.current?.stopScreenShare();
       setIsScreenSharing(false);
+      setLocalScreenStream(null);
     } else {
       try {
-        await voiceManagerRef.current?.startScreenShare();
+        const stream = await voiceManagerRef.current?.startScreenShare();
         setIsScreenSharing(true);
+        setLocalScreenStream(stream || null);
       } catch (err) {
         if (err.name !== 'NotAllowedError') {
           alert('Erro ao compartilhar tela: ' + err.message);
@@ -635,6 +660,7 @@ function App() {
                               </span>
                               <span className="voice-user-name">{p.displayName}</span>
                               {p.muted && <MicOff size={12} className="voice-badge-muted" />}
+                              {p.cameraOn && <Video size={12} style={{ color: '#57F287' }} />}
                               {p.screenSharing && <span className="live-badge">AO VIVO</span>}
                             </div>
                           ))}
@@ -699,8 +725,15 @@ function App() {
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
               <button
+                className={`icon-btn ${isCameraOn ? 'active' : ''}`}
+                title={isCameraOn ? 'Desligar Câmera' : 'Ligar Câmera (1080p 60fps)'}
+                onClick={toggleCamera}
+              >
+                {isCameraOn ? <VideoOff size={16} /> : <Video size={16} />}
+              </button>
+              <button
                 className={`icon-btn ${isScreenSharing ? 'active' : ''}`}
-                title={isScreenSharing ? 'Parar Compartilhamento' : 'Compartilhar Tela'}
+                title={isScreenSharing ? 'Parar Compartilhamento' : 'Compartilhar Tela (1080p 60fps)'}
                 onClick={toggleScreenShare}
               >
                 {isScreenSharing ? <MonitorOff size={16} /> : <MonitorUp size={16} />}
@@ -718,7 +751,10 @@ function App() {
                 onClick={async () => {
                   await voiceManagerRef.current?.leave();
                   setVoiceChannelId(null);
+                  setIsCameraOn(false);
                   setIsScreenSharing(false);
+                  setLocalCameraStream(null);
+                  setLocalScreenStream(null);
                 }}
               >
                 <PhoneOff size={16} />
@@ -757,18 +793,68 @@ function App() {
 
       {/* Main Content */}
       <div className="main-stage">
-        {remoteScreens.length > 0 && (
+        {(localCameraStream || localScreenStream || remoteVideos.length > 0) && (
           <div className="screen-share-stage">
-            {remoteScreens.map(sc => (
-              <div key={sc.socketId} className="screen-tile">
+            {localCameraStream && (
+              <div className="screen-tile">
+                <video
+                  className="video-mirror"
+                  autoPlay
+                  muted
+                  playsInline
+                  ref={el => {
+                    if (el && el.srcObject !== localCameraStream) el.srcObject = localCameraStream;
+                  }}
+                />
+                <div className="screen-label">Sua Câmera • 1080p 60fps</div>
+                <button
+                  className="screen-fullscreen-btn"
+                  title="Tela Cheia"
+                  onClick={e => e.currentTarget.parentElement?.querySelector('video')?.requestFullscreen?.()}
+                >
+                  <Maximize2 size={14} />
+                </button>
+              </div>
+            )}
+            {localScreenStream && (
+              <div className="screen-tile">
+                <video
+                  autoPlay
+                  muted
+                  playsInline
+                  ref={el => {
+                    if (el && el.srcObject !== localScreenStream) el.srcObject = localScreenStream;
+                  }}
+                />
+                <div className="screen-label">Sua Tela • 1080p 60fps AO VIVO</div>
+                <button
+                  className="screen-fullscreen-btn"
+                  title="Tela Cheia"
+                  onClick={e => e.currentTarget.parentElement?.querySelector('video')?.requestFullscreen?.()}
+                >
+                  <Maximize2 size={14} />
+                </button>
+              </div>
+            )}
+            {remoteVideos.map(v => (
+              <div key={v.id} className="screen-tile">
                 <video
                   autoPlay
                   playsInline
                   ref={el => {
-                    if (el && el.srcObject !== sc.stream) el.srcObject = sc.stream;
+                    if (el && el.srcObject !== v.stream) el.srcObject = v.stream;
                   }}
                 />
-                <div className="screen-label">Tela de {sc.displayName}</div>
+                <div className="screen-label">
+                  {v.kind === 'camera' ? `Câmera de ${v.displayName}` : `Tela de ${v.displayName} • 1080p 60fps`}
+                </div>
+                <button
+                  className="screen-fullscreen-btn"
+                  title="Tela Cheia"
+                  onClick={e => e.currentTarget.parentElement?.querySelector('video')?.requestFullscreen?.()}
+                >
+                  <Maximize2 size={14} />
+                </button>
               </div>
             ))}
           </div>
