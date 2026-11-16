@@ -738,11 +738,16 @@ function App() {
                       </div>
                       {participants.length > 0 && (
                         <div className="voice-participants">
-                          {participants.map(p => (
+                          {participants.map(p => {
+                            const srvMember = activeServer?.members?.find(m => m.id === p.userId);
+                            const vAvatarUrl = p.avatarUrl || srvMember?.avatar_url;
+                            const vDeco = (p.avatarDecoration && p.avatarDecoration !== 'none' ? p.avatarDecoration : srvMember?.avatar_decoration) || 'none';
+                            const vColor = p.avatarColor || srvMember?.avatar_color || '#5865F2';
+                            return (
                             <div
                               key={p.socketId}
                               className={`voice-user clickable ${p.speaking ? 'speaking' : ''}`}
-                              title={p.userId !== user.id ? 'Botão direito para ajustar o volume (0% - 200%)' : p.displayName}
+                              title={p.userId !== user.id ? 'Botão direito para ajustar o volume (0% - 400%)' : p.displayName}
                               onContextMenu={e => {
                                 if (p.userId !== user.id) {
                                   e.preventDefault();
@@ -751,11 +756,11 @@ function App() {
                               }}
                             >
                               <span
-                                className={`avatar xs ${p.speaking ? 'speaking-ring' : ''} deco-${p.avatarDecoration || 'none'}`}
-                                style={{ background: p.avatarColor }}
+                                className={`avatar xs ${p.speaking ? 'speaking-ring' : ''} deco-${vDeco}`}
+                                style={{ background: vColor }}
                               >
-                                {p.avatarUrl ? (
-                                  <img src={resolveAssetUrl(p.avatarUrl)} alt={p.displayName} className="avatar-img" />
+                                {vAvatarUrl ? (
+                                  <img src={resolveAssetUrl(vAvatarUrl)} alt={p.displayName} className="avatar-img" />
                                 ) : (
                                   p.displayName[0].toUpperCase()
                                 )}
@@ -768,7 +773,8 @@ function App() {
                               {p.cameraOn && <Video size={12} style={{ color: '#57F287' }} />}
                               {p.screenSharing && <span className="live-badge">AO VIVO</span>}
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
