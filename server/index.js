@@ -255,7 +255,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.get('/api/auth/me', authMiddleware, (req, res) => {
-  res.json({ user: req.user });
+  res.json({ user: req.user, token: signToken(req.user.id) });
 });
 
 app.patch('/api/auth/profile', authMiddleware, async (req, res) => {

@@ -149,7 +149,10 @@ function App() {
       return;
     }
     apiFetch('/api/auth/me')
-      .then(data => setUser(data.user))
+      .then(data => {
+        if (data.token) setToken(data.token);
+        setUser(data.user);
+      })
       .catch(() => setToken(''))
       .finally(() => setBooting(false));
   }, []);
