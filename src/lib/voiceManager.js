@@ -394,15 +394,19 @@ export class VoiceManager {
       },
       audio: {
         suppressLocalAudioPlayback: false,
-        echoCancellation: true,
+        echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false
       }
     });
     this.screenStream = stream;
-    // Resume both mic and playback AudioContexts immediately in case Windows/Chrome paused them
+    // Ensure mic pipeline AudioContext stays running and wasn't interrupted by getDisplayMedia
     if (this.pipeline?.context?.state === 'suspended') {
       await this.pipeline.context.resume().catch(() => {});
+    }
+    const micTrack = this.pipeline?.rawStream?.getAudioTracks?.()[0];
+    if (micTrack && micTrack.readyState !== 'live') {
+      await this.reloadPipeline().catch(() => {});
     }
     if (this.playbackCtx?.state === 'suspended') {
       await this.playbackCtx.resume().catch(() => {});
@@ -628,7 +632,10 @@ export class VoiceManager {
 
         const srcNode = this.playbackCtx.createMediaStreamSource(trackStream);
         const gainNode = this.playbackCtx.createGain();
-        const isScreenAudio = this.trackMetaMap.get(event.track.id) === 'screen-audio';
+        // Screen-share audio either shares a MediaStream with a video track or arrives after the mic track
+        const isScreenAudio =
+          (event.streams?.[0]?.getVideoTracks?.().length > 0) ||
+          gainNodes.size > 0;
         if (isScreenAudio) {
           gainNode.gain.value = (this.deafened || this.screenAudioMuted.has(targetSocketId)) ? 0 : 1;
           screenGainNodes.set(event.track.id, gainNode);

@@ -2089,8 +2089,38 @@ body {
   inset: 0;
   pointer-events: none;
   z-index: 1;
-  opacity: 0.55;
+  opacity: 0.78;
   border: none !important;
+}
+
+.effect-cyber-glitch .profile-fx-overlay::before {
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 229, 255, 0.16) 0px,
+    rgba(0, 229, 255, 0.16) 2px,
+    transparent 2px,
+    transparent 6px
+  );
+}
+
+.effect-sakura-glow .profile-fx-overlay::before {
+  font-size: 20px;
+  opacity: 0.95;
+  text-shadow: 0 0 12px rgba(236, 72, 153, 0.9);
+}
+
+.effect-crimson-thunder .profile-fx-overlay::after {
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.45) 0%, rgba(245, 158, 11, 0.18) 35%, transparent 65%);
+}
+
+.effect-galaxy-portal .profile-fx-overlay::before {
+  width: 260px;
+  height: 260px;
+  background: conic-gradient(from 0deg, transparent, rgba(168, 85, 247, 0.55), rgba(56, 189, 248, 0.55), transparent);
+}
+
+.effect-matrix-rain .profile-fx-overlay::before {
+  background: linear-gradient(180deg, rgba(35, 165, 89, 0.35) 0%, transparent 45%, rgba(16, 185, 129, 0.25) 100%);
 }
 
 /* Per-User Volume Slider Popover */
