@@ -13,9 +13,6 @@ import rnnoiseWasmUrl from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url';
 import rnnoiseSimdWasmUrl from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url';
 import noiseGateWorkletUrl from '@sapphi-red/web-noise-suppressor/noiseGateWorklet.js?url';
 
-let cachedGtcrnWasm = null;
-let cachedRnnoiseWasm = null;
-
 async function addWorkletModuleSafe(ctx, url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status} loading worklet`);
@@ -27,6 +24,9 @@ async function addWorkletModuleSafe(ctx, url) {
     URL.revokeObjectURL(blobUrl);
   }
 }
+
+let cachedGtcrnWasm = null;
+let cachedRnnoiseWasm = null;
 
 async function getGtcrnBinary() {
   if (!cachedGtcrnWasm) {
@@ -50,8 +50,8 @@ export function getSavedVoiceSettings() {
     // ignore
   }
   return {
-    noiseMode: 'gtcrn', // 'gtcrn' | 'rnnoise' | 'off'
-    gateThresholdDb: -48,
+    noiseMode: 'hybrid', // 'hybrid' (RNNoise + GTCRN) | 'gtcrn' | 'rnnoise' | 'off'
+    gateThresholdDb: -38,
     inputDeviceId: 'default',
     outputDeviceId: 'default'
   };
@@ -63,11 +63,15 @@ export function saveVoiceSettings(settings) {
 
 /**
  * Creates a low-latency 48kHz AudioWorklet pipeline:
- * Mic -> HighPass (85Hz) -> Neural AI Suppressor (GTCRN / RNNoise) -> NoiseGate -> Compressor -> WebRTC Destination
+ * Mic (AGC OFF so keyboard clicks aren't boosted)
+ * -> Voice Bandpass (110Hz HighPass + 7.5kHz LowPass)
+ * -> Dual Neural AI Suppressor (RNNoise SIMD -> GTCRN Deep Learning)
+ * -> Tight NoiseGate (-38dB default, 110ms hold)
+ * -> Broadcast Compressor -> WebRTC Destination
  */
 export async function createProcessedMicPipeline(options = {}) {
   const settings = { ...getSavedVoiceSettings(), ...options };
-  const useNeural = settings.noiseMode === 'gtcrn' || settings.noiseMode === 'rnnoise';
+  const useNeural = settings.noiseMode !== 'off';
 
   const rawStream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -77,8 +81,8 @@ export async function createProcessedMicPipeline(options = {}) {
       sampleRate: { ideal: 48000 },
       channelCount: { ideal: 1 },
       echoCancellation: true,
-      autoGainControl: true,
-      // Disable browser's basic suppressor when Neural AI is active to avoid muffled speech
+      // Keep AGC off when Neural AI is active so quiet keyboard/mouse clicks aren't amplified during silence
+      autoGainControl: !useNeural,
       noiseSuppression: !useNeural
     },
     video: false
@@ -95,45 +99,56 @@ export async function createProcessedMicPipeline(options = {}) {
 
   const source = ctx.createMediaStreamSource(rawStream);
 
-  // 1. High-pass filter at 85Hz to eliminate desk bumps, AC hum, and wind rumble
+  // 1a. High-pass filter at 110Hz to cut desk bumps, AC hum, and sub-bass rumble
   const highPass = ctx.createBiquadFilter();
   highPass.type = 'highpass';
-  highPass.frequency.value = 85;
-  highPass.Q.value = 0.707;
+  highPass.frequency.value = 110;
+  highPass.Q.value = 0.8;
 
-  let currentNode = highPass;
+  // 1b. Low-pass filter at 7.5kHz to attenuate high-pitched mechanical keyboard clacks
+  const lowPass = ctx.createBiquadFilter();
+  lowPass.type = 'lowpass';
+  lowPass.frequency.value = 7500;
+  lowPass.Q.value = 0.707;
+
   source.connect(highPass);
+  highPass.connect(lowPass);
+  let currentNode = lowPass;
 
-  let aiNode = null;
+  const aiNodes = [];
   let gateNode = null;
 
-  // 2. Neural AI Noise Suppression (GTCRN or RNNoise SIMD)
+  // 2. Neural AI Noise Suppression
   try {
-    if (settings.noiseMode === 'gtcrn') {
-      await addWorkletModuleSafe(ctx, gtcrnWorkletUrl);
-      const wasmBinary = await getGtcrnBinary();
-      aiNode = new GtcrnWorkletNode(ctx, { maxChannels: 1, wasmBinary });
-      currentNode.connect(aiNode);
-      currentNode = aiNode;
-    } else if (settings.noiseMode === 'rnnoise') {
+    if (settings.noiseMode === 'hybrid' || settings.noiseMode === 'rnnoise') {
       await addWorkletModuleSafe(ctx, rnnoiseWorkletUrl);
-      const wasmBinary = await getRnnoiseBinary();
-      aiNode = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary });
-      currentNode.connect(aiNode);
-      currentNode = aiNode;
+      const rnBinary = await getRnnoiseBinary();
+      const rnNode = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary: rnBinary });
+      currentNode.connect(rnNode);
+      currentNode = rnNode;
+      aiNodes.push(rnNode);
+    }
+
+    if (settings.noiseMode === 'hybrid' || settings.noiseMode === 'gtcrn') {
+      await addWorkletModuleSafe(ctx, gtcrnWorkletUrl);
+      const gtBinary = await getGtcrnBinary();
+      const gtNode = new GtcrnWorkletNode(ctx, { maxChannels: 1, wasmBinary: gtBinary });
+      currentNode.connect(gtNode);
+      currentNode = gtNode;
+      aiNodes.push(gtNode);
     }
   } catch (err) {
     console.warn('[RONNCORD] Neural AI worklet fallback:', err);
   }
 
-  // 3. Smart Noise Gate
+  // 3. Tight Smart Noise Gate (blocks keyboard clicks below threshold)
   if (settings.gateThresholdDb > -70) {
     try {
       await addWorkletModuleSafe(ctx, noiseGateWorkletUrl);
       gateNode = new NoiseGateWorkletNode(ctx, {
         openThreshold: settings.gateThresholdDb,
-        closeThreshold: settings.gateThresholdDb - 4,
-        holdMs: 180,
+        closeThreshold: settings.gateThresholdDb - 5,
+        holdMs: 110,
         maxChannels: 1
       });
       currentNode.connect(gateNode);
@@ -143,19 +158,19 @@ export async function createProcessedMicPipeline(options = {}) {
     }
   }
 
-  // 4. Broadcast Voice Compressor (prevents clipping, keeps quiet voice clear)
+  // 4. Broadcast Voice Compressor (8ms attack avoids boosting sharp 1ms keyboard transients)
   const compressor = ctx.createDynamicsCompressor();
-  compressor.threshold.value = -20;
-  compressor.knee.value = 18;
-  compressor.ratio.value = 4;
-  compressor.attack.value = 0.002;
-  compressor.release.value = 0.12;
+  compressor.threshold.value = -18;
+  compressor.knee.value = 16;
+  compressor.ratio.value = 3.5;
+  compressor.attack.value = 0.008;
+  compressor.release.value = 0.14;
   currentNode.connect(compressor);
 
   // 5. Analyser for real-time VAD & dB meter
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
-  analyser.smoothingTimeConstant = 0.3;
+  analyser.smoothingTimeConstant = 0.25;
   compressor.connect(analyser);
 
   const destination = ctx.createMediaStreamDestination();
@@ -169,9 +184,9 @@ export async function createProcessedMicPipeline(options = {}) {
 
   const timeDomain = new Float32Array(analyser.fftSize);
   let rafId = null;
-  let lastSpeaking = false;
 
   function startMeter(onLevel) {
+    const vadThreshold = Math.max(-44, settings.gateThresholdDb - 2);
     function tick() {
       analyser.getFloatTimeDomainData(timeDomain);
       let sum = 0;
@@ -181,10 +196,7 @@ export async function createProcessedMicPipeline(options = {}) {
       const rms = Math.sqrt(sum / timeDomain.length);
       const db = rms > 0 ? 20 * Math.log10(rms) : -100;
       const normalized = Math.max(0, Math.min(1, (db + 65) / 55));
-      const speaking = db > -46;
-      if (speaking !== lastSpeaking) {
-        lastSpeaking = speaking;
-      }
+      const speaking = db > vadThreshold;
       onLevel({ db, normalized, speaking });
       rafId = requestAnimationFrame(tick);
     }
@@ -203,7 +215,9 @@ export async function createProcessedMicPipeline(options = {}) {
 
   function destroy() {
     if (rafId) cancelAnimationFrame(rafId);
-    try { aiNode?.destroy?.(); } catch {}
+    for (const node of aiNodes) {
+      try { node?.destroy?.(); } catch {}
+    }
     try { gateNode?.disconnect(); } catch {}
     rawStream.getTracks().forEach(t => t.stop());
     ctx.close().catch(() => {});

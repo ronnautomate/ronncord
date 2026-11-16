@@ -72,12 +72,21 @@ export function VoiceSettingsModal({ onClose, onApplySettings }) {
             <div className="noise-modes-grid">
               <button
                 type="button"
+                className={`noise-mode-card ${settings.noiseMode === 'hybrid' ? 'selected' : ''}`}
+                onClick={() => setSettings(s => ({ ...s, noiseMode: 'hybrid' }))}
+              >
+                <div className="noise-badge">MÁXIMO • ANTI-TECLADO</div>
+                <strong>RONNCORD AI Max (RNNoise + GTCRN Duplo)</strong>
+                <small>Cascata dupla de IA + corte de frequência vocal (110Hz–7.5kHz) + AGC desligado. Elimina teclado mecânico e barulho externo.</small>
+              </button>
+
+              <button
+                type="button"
                 className={`noise-mode-card ${settings.noiseMode === 'gtcrn' ? 'selected' : ''}`}
                 onClick={() => setSettings(s => ({ ...s, noiseMode: 'gtcrn' }))}
               >
-                <div className="noise-badge">RECOMENDADO</div>
                 <strong>RONNCORD AI Ultra (GTCRN)</strong>
-                <small>Rede neural profunda que remove teclado, ventoinha, rua e latidos mantendo a voz cristalina.</small>
+                <small>Rede neural profunda única com menor uso de CPU.</small>
               </button>
 
               <button
@@ -86,7 +95,7 @@ export function VoiceSettingsModal({ onClose, onApplySettings }) {
                 onClick={() => setSettings(s => ({ ...s, noiseMode: 'rnnoise' }))}
               >
                 <strong>RNNoise Neural (SIMD)</strong>
-                <small>Rede neural ultraleve com aceleração SIMD e latência quase zero.</small>
+                <small>Rede neural ultraleve com aceleração SIMD.</small>
               </button>
 
               <button
@@ -95,7 +104,7 @@ export function VoiceSettingsModal({ onClose, onApplySettings }) {
                 onClick={() => setSettings(s => ({ ...s, noiseMode: 'off' }))}
               >
                 <strong>Desligado (Estúdio)</strong>
-                <small>Apenas filtro passa-alta (85Hz) + compressor, sem IA.</small>
+                <small>Apenas filtro vocal + compressor, sem IA.</small>
               </button>
             </div>
           </label>

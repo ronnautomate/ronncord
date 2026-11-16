@@ -716,7 +716,9 @@ function App() {
                 Voz Conectada {voicePing !== null ? `• ${voicePing} ms` : ''}
               </strong>
               <small>
-                {voiceSettings.noiseMode === 'gtcrn'
+                {voiceSettings.noiseMode === 'hybrid'
+                  ? 'AI Max (RNNoise+GTCRN) • Opus 10ms'
+                  : voiceSettings.noiseMode === 'gtcrn'
                   ? 'AI Ultra (GTCRN) • Opus 10ms'
                   : voiceSettings.noiseMode === 'rnnoise'
                   ? 'RNNoise SIMD • Opus 10ms'
