@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Hash, AtSign, Search, Users, PlusCircle, Smile, SendHorizontal,
-  Reply, Pencil, Trash2, X, Paperclip, FileText
+  Reply, Pencil, Trash2, X, Paperclip, FileText, Pin, Mic, Square
 } from 'lucide-react';
 import { resolveAssetUrl } from '../lib/api.js';
 import { GifPicker } from './GifPicker.jsx';
@@ -15,7 +15,7 @@ function formatTime(ts) {
 
 function renderFormattedText(text) {
   if (!text) return null;
-  const parts = text.split(/(```[\s\S]*?```|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|https?:\/\/[^\s]+)/g);
+  const parts = text.split(/(```[\s\S]*?```|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|https?:\/\/[^\s]+|@[a-zA-Z0-9_.-]+)/g);
   return parts.map((part, idx) => {
     if (part.startsWith('```') && part.endsWith('```')) {
       return <pre key={idx} className="code-block"><code>{part.slice(3, -3).trim()}</code></pre>;
@@ -31,6 +31,9 @@ function renderFormattedText(text) {
     }
     if (/^https?:\/\//.test(part)) {
       return <a key={idx} href={part} target="_blank" rel="noreferrer">{part}</a>;
+    }
+    if (/^@[a-zA-Z0-9_.-]+$/.test(part)) {
+      return <span key={idx} className="mention-pill">{part}</span>;
     }
     return <React.Fragment key={idx}>{part}</React.Fragment>;
   });
@@ -49,6 +52,7 @@ export function ChatArea({
   onEditMessage,
   onDeleteMessage,
   onToggleReaction,
+  onTogglePin,
   onUploadFile,
   onTyping,
   onSelectUser
@@ -62,11 +66,17 @@ export function ChatArea({
   const [uploading, setUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
+  const [showPinned, setShowPinned] = useState(false);
   const [reactingMsgId, setReactingMsgId] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [recordSec, setRecordSec] = useState(0);
 
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordChunksRef = useRef([]);
+  const recordTimerRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -120,6 +130,65 @@ export function ChatArea({
     setEditText('');
   }
 
+  async function startVoiceNote() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : undefined });
+      recordChunksRef.current = [];
+      mr.ondataavailable = ev => { if (ev.data.size > 0) recordChunksRef.current.push(ev.data); };
+      mr.onstop = () => stream.getTracks().forEach(t => t.stop());
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setRecording(true);
+      setRecordSec(0);
+      recordTimerRef.current = setInterval(() => setRecordSec(s => s + 1), 1000);
+    } catch (err) {
+      alert('Não foi possível gravar áudio: ' + err.message);
+    }
+  }
+
+  function cancelVoiceNote() {
+    clearInterval(recordTimerRef.current);
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== 'inactive') {
+      mr.onstop = () => mr.stream.getTracks().forEach(t => t.stop());
+      mr.stop();
+    }
+    setRecording(false);
+    setRecordSec(0);
+  }
+
+  async function sendVoiceNote() {
+    clearInterval(recordTimerRef.current);
+    const mr = mediaRecorderRef.current;
+    if (!mr) return;
+    setRecording(false);
+    setUploading(true);
+    try {
+      await new Promise(resolve => {
+        const origStop = mr.onstop;
+        mr.onstop = () => {
+          origStop?.();
+          resolve();
+        };
+        if (mr.state !== 'inactive') mr.stop();
+        else resolve();
+      });
+      const blob = new Blob(recordChunksRef.current, { type: 'audio/webm' });
+      const file = new File([blob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+      const uploaded = await onUploadFile(file);
+      await onSendMessage({ content: '', attachments: [uploaded], reply_to_id: replyTo?.id || null });
+      setReplyTo(null);
+    } catch (err) {
+      alert('Erro ao enviar áudio: ' + err.message);
+    } finally {
+      setUploading(false);
+      setRecordSec(0);
+    }
+  }
+
+  const pinnedMessages = messages.filter(m => m.pinned);
+
   const visibleMessages = searchQuery.trim()
     ? messages.filter(m =>
         m.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -136,7 +205,7 @@ export function ChatArea({
           {topic && <span className="chat-topic">{topic}</span>}
         </div>
 
-        <div className="header-actions">
+        <div className="header-actions" style={{ position: 'relative' }}>
           <div className="search-box">
             <Search size={14} />
             <input
@@ -150,6 +219,40 @@ export function ChatArea({
               </button>
             )}
           </div>
+          <button
+            className={`icon-btn ${showPinned ? 'active' : ''}`}
+            title="Mensagens Fixadas"
+            onClick={() => setShowPinned(v => !v)}
+            style={{ position: 'relative' }}
+          >
+            <Pin size={18} />
+            {pinnedMessages.length > 0 && <span className="pin-count-dot">{pinnedMessages.length}</span>}
+          </button>
+          {showPinned && (
+            <div className="pinned-popover">
+              <div className="pinned-popover-header">
+                <strong>Mensagens Fixadas ({pinnedMessages.length})</strong>
+                <button className="icon-btn xs" onClick={() => setShowPinned(false)}><X size={14} /></button>
+              </div>
+              {pinnedMessages.length === 0 ? (
+                <p style={{ color: 'var(--text-muted)', fontSize: 13, padding: 12 }}>Nenhuma mensagem fixada neste canal.</p>
+              ) : (
+                pinnedMessages.map(pm => (
+                  <div key={pm.id} className="pinned-item">
+                    <div>
+                      <strong>{pm.author?.display_name}</strong>
+                      <p>{pm.content || '📎 Anexo'}</p>
+                    </div>
+                    {onTogglePin && (
+                      <button className="icon-btn xs" title="Desafixar" onClick={() => onTogglePin(pm.id)}>
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
           {!isDM && (
             <button
               className={`icon-btn ${showMembers ? 'active' : ''}`}
@@ -243,11 +346,20 @@ export function ChatArea({
                       {msg.attachments.map((att, idx) => {
                         const fullUrl = resolveAssetUrl(att.url);
                         const isImg = att.mimetype?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(att.name || '');
-                        return isImg ? (
-                          <a key={idx} href={fullUrl} target="_blank" rel="noreferrer" className="attachment-image-wrap">
-                            <img src={fullUrl} alt={att.name} />
-                          </a>
-                        ) : (
+                        const isAudio = att.mimetype?.startsWith('audio/') || /\.(webm|ogg|mp3|wav)$/i.test(att.name || '');
+                        if (isImg) {
+                          return (
+                            <a key={idx} href={fullUrl} target="_blank" rel="noreferrer" className="attachment-image-wrap">
+                              <img src={fullUrl} alt={att.name} />
+                            </a>
+                          );
+                        }
+                        if (isAudio) {
+                          return (
+                            <audio key={idx} controls src={fullUrl} className="attachment-audio" />
+                          );
+                        }
+                        return (
                           <a key={idx} href={fullUrl} target="_blank" rel="noreferrer" className="attachment-file">
                             <FileText size={18} />
                             <span>{att.name}</span>
@@ -288,6 +400,11 @@ export function ChatArea({
                   <button type="button" title="Responder" onClick={() => setReplyTo(msg)}>
                     <Reply size={15} />
                   </button>
+                  {onTogglePin && (
+                    <button type="button" title={msg.pinned ? 'Desafixar' : 'Fixar mensagem'} onClick={() => onTogglePin(msg.id)}>
+                      <Pin size={15} style={msg.pinned ? { color: 'var(--yellow)' } : undefined} />
+                    </button>
+                  )}
                   {isMine && (
                     <>
                       <button
@@ -377,11 +494,34 @@ export function ChatArea({
             <PlusCircle size={20} />
           </button>
 
-          <input
-            value={text}
-            onChange={e => handleTextChange(e.target.value)}
-            placeholder={uploading ? 'Enviando arquivo...' : `Conversar em ${isDM ? '@' : '#'}${title}`}
-          />
+          {recording ? (
+            <div className="voice-note-bar">
+              <span className="rec-dot" />
+              <span>Gravando áudio... {Math.floor(recordSec / 60)}:{String(recordSec % 60).padStart(2, '0')}</span>
+              <button type="button" className="btn-ghost xs" onClick={cancelVoiceNote}>Cancelar</button>
+              <button type="button" className="btn-primary xs" onClick={sendVoiceNote}>
+                <Square size={12} /> Enviar Áudio
+              </button>
+            </div>
+          ) : (
+            <input
+              value={text}
+              onChange={e => handleTextChange(e.target.value)}
+              placeholder={uploading ? 'Enviando arquivo...' : `Conversar em ${isDM ? '@' : '#'}${title}`}
+            />
+          )}
+
+          {!recording && (
+            <button
+              type="button"
+              className="icon-btn"
+              title="Gravar Mensagem de Áudio"
+              disabled={uploading}
+              onClick={startVoiceNote}
+            >
+              <Mic size={19} />
+            </button>
+          )}
 
           <div style={{ position: 'relative' }}>
             <button

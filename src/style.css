@@ -2247,3 +2247,101 @@ body {
   accent-color: var(--accent);
   cursor: pointer;
 }
+
+/* Mentions, Unread Badges, Pinned Messages & Voice Notes */
+.mention-pill {
+  background: rgba(88, 101, 242, 0.28);
+  color: #c9cdfb;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.unread-badge {
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+}
+
+.pin-count-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: var(--yellow);
+  color: #111;
+  font-size: 9px;
+  font-weight: 800;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+.pinned-popover {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  width: 340px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  z-index: 45;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+}
+
+.pinned-popover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.pinned-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #35373c;
+  font-size: 13px;
+}
+
+.pinned-item p {
+  color: #dbdee1;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+.attachment-audio {
+  height: 36px;
+  max-width: 300px;
+}
+
+.voice-note-bar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: pulse 1s infinite;
+}

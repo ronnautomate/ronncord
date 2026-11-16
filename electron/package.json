@@ -1,0 +1,25 @@
+{
+  "name": "ronncord-desktop",
+  "version": "1.0.0",
+  "description": "RONNCORD Desktop App",
+  "main": "main.cjs",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.ronnautomate.ronncord",
+    "productName": "RONNCORD",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

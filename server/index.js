@@ -150,6 +150,7 @@ async function hydrateMessage(msg) {
     reply_to_id: msg.reply_to_id,
     reply_to: replyTo,
     reactions: Object.values(grouped),
+    pinned: Boolean(msg.pinned),
     edited_at: msg.edited_at,
     created_at: msg.created_at
   };
@@ -691,6 +692,23 @@ app.post('/api/messages/:messageId/reactions', authMiddleware, async (req, res) 
     await db.run('INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, ?)', msg.id, req.user.id, emoji);
   }
   const hydrated = await hydrateMessage(msg);
+  const room = msg.channel_id ? `channel:${msg.channel_id}` : `dm:${msg.dm_thread_id}`;
+  io.to(room).emit('message:updated', hydrated);
+  res.json({ message: hydrated });
+});
+
+app.post('/api/messages/:messageId/pin', authMiddleware, async (req, res) => {
+  const msg = await db.get('SELECT * FROM messages WHERE id = ?', req.params.messageId);
+  if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+
+  const hasAccess = msg.channel_id
+    ? await userCanAccessChannel(req.user.id, msg.channel_id)
+    : await userCanAccessDm(req.user.id, msg.dm_thread_id);
+  if (!hasAccess) return res.status(403).json({ error: 'Sem acesso a esta mensagem' });
+
+  const nextPinned = msg.pinned ? 0 : 1;
+  await db.run('UPDATE messages SET pinned = ? WHERE id = ?', nextPinned, msg.id);
+  const hydrated = await hydrateMessage(await db.get('SELECT * FROM messages WHERE id = ?', msg.id));
   const room = msg.channel_id ? `channel:${msg.channel_id}` : `dm:${msg.dm_thread_id}`;
   io.to(room).emit('message:updated', hydrated);
   res.json({ message: hydrated });

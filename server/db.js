@@ -188,7 +188,8 @@ export async function initDatabase() {
     "ALTER TABLE users ADD COLUMN clan_icon TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE users ADD COLUMN badges_json TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE users ADD COLUMN profile_effect TEXT NOT NULL DEFAULT 'none'",
-    "ALTER TABLE users ADD COLUMN banner_url TEXT"
+    "ALTER TABLE users ADD COLUMN banner_url TEXT",
+    "ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
   ]) {
     try { await db.exec(col); } catch {}
   }

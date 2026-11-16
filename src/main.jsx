@@ -116,6 +116,25 @@ function App() {
   const [deafened, setDeafened] = useState(() => localStorage.getItem('ronncord_deafened') === '1');
   const [pttActive, setPttActive] = useState(false);
   const [screenVolumes, setScreenVolumes] = useState({});
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const activeChannelIdRef = useRef(null);
+  const activeDmIdRef = useRef(null);
+  const viewModeRef = useRef('server');
+
+  useEffect(() => {
+    activeChannelIdRef.current = activeChannelId;
+    activeDmIdRef.current = activeDmId;
+    viewModeRef.current = viewMode;
+    const key = viewMode === 'server' ? activeChannelId : activeDmId;
+    if (key) {
+      setUnreadCounts(prev => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  }, [activeChannelId, activeDmId, viewMode]);
 
   const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile' | 'voice-settings' | 'new-dm'
   const [selectedProfile, setSelectedProfile] = useState(null);
@@ -195,8 +214,31 @@ function App() {
     socketRef.current = socket;
     if (socket) {
       socket.on('message:new', msg => {
-        if (msg.author_id !== user.id) SoundFX.message();
-        setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+        const targetKey = msg.channel_id || msg.dm_thread_id;
+        const isCurrentlyOpen =
+          (viewModeRef.current === 'server' && msg.channel_id === activeChannelIdRef.current) ||
+          (viewModeRef.current === 'home' && msg.dm_thread_id === activeDmIdRef.current);
+
+        if (msg.author_id !== user.id) {
+          SoundFX.message();
+          const mentioned =
+            msg.content?.toLowerCase().includes(`@${user.username?.toLowerCase()}`) ||
+            Boolean(msg.dm_thread_id);
+          if (!isCurrentlyOpen || document.hidden) {
+            if (targetKey) {
+              setUnreadCounts(prev => ({ ...prev, [targetKey]: (prev[targetKey] || 0) + 1 }));
+            }
+            if (mentioned && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+              new Notification(`${msg.author?.display_name || 'RONNCORD'}`, {
+                body: msg.content || 'Enviou um anexo'
+              });
+            }
+          }
+        }
+
+        if (isCurrentlyOpen) {
+          setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+        }
       });
       socket.on('message:updated', msg => {
         setMessages(prev => prev.map(m => (m.id === msg.id ? msg : m)));
@@ -519,6 +561,14 @@ function App() {
     await apiFetch(`/api/messages/${messageId}/reactions`, { method: 'POST', body: JSON.stringify({ emoji }) });
   }
 
+  async function handleTogglePin(messageId) {
+    if (isDemo) {
+      setMessages(prev => prev.map(m => (m.id === messageId ? { ...m, pinned: !m.pinned } : m)));
+      return;
+    }
+    await apiFetch(`/api/messages/${messageId}/pin`, { method: 'POST' });
+  }
+
   async function handleUploadFile(file) {
     if (isDemo) {
       return {
@@ -770,10 +820,16 @@ function App() {
                   <div
                     key={ch.id}
                     className={`channel ${activeChannelId === ch.id ? 'selected' : ''}`}
-                    onClick={() => setActiveChannelId(ch.id)}
+                    onClick={() => {
+                      setActiveChannelId(ch.id);
+                      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                        Notification.requestPermission().catch(() => {});
+                      }
+                    }}
                   >
                     <Hash size={16} />
-                    <span>{ch.name}</span>
+                    <span style={{ flex: 1 }}>{ch.name}</span>
+                    {unreadCounts[ch.id] > 0 && <span className="unread-badge">{unreadCounts[ch.id]}</span>}
                   </div>
                 ))}
               </div>
@@ -909,7 +965,8 @@ function App() {
                     <div className="avatar xs" style={{ background: t.peer_avatar_color }}>
                       {(t.peer_display_name || t.peer_username)[0].toUpperCase()}
                     </div>
-                    <span>{t.peer_display_name}</span>
+                    <span style={{ flex: 1 }}>{t.peer_display_name}</span>
+                    {unreadCounts[t.id] > 0 && <span className="unread-badge">{unreadCounts[t.id]}</span>}
                   </div>
                 ))}
               </div>
@@ -1240,6 +1297,7 @@ function App() {
           onEditMessage={handleEditMessage}
           onDeleteMessage={handleDeleteMessage}
           onToggleReaction={handleToggleReaction}
+          onTogglePin={handleTogglePin}
           onUploadFile={handleUploadFile}
           onSelectUser={setSelectedProfile}
           onTyping={isTyping =>
@@ -1258,6 +1316,7 @@ function App() {
           onEditMessage={handleEditMessage}
           onDeleteMessage={handleDeleteMessage}
           onToggleReaction={handleToggleReaction}
+          onTogglePin={handleTogglePin}
           onUploadFile={handleUploadFile}
           onSelectUser={setSelectedProfile}
           onTyping={isTyping =>
