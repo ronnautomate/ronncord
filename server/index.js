@@ -69,6 +69,20 @@ const AVATAR_COLORS = ['#5865F2', '#57F287', '#FEE75C', '#EB459E', '#ED4245', '#
 const pickColor = () => AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
 const makeInviteCode = () => crypto.randomBytes(4).toString('hex');
 
+function sanitizeAssetUrl(url) {
+  if (!url) return null;
+  const s = String(url).trim();
+  if (s.startsWith('/uploads/') || /^https?:\/\//i.test(s)) return s;
+  return null;
+}
+
+function sanitizeAttachments(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map(a => ({ ...a, url: sanitizeAssetUrl(a?.url) }))
+    .filter(a => Boolean(a.url));
+}
+
 function signToken(userId) {
   return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '30d' });
 }
@@ -276,9 +290,9 @@ app.patch('/api/auth/profile', authMiddleware, (req, res) => {
     custom_status ?? null,
     bio ?? null,
     avatar_color ?? null,
-    avatar_url !== undefined ? avatar_url : req.user.avatar_url,
+    avatar_url !== undefined ? sanitizeAssetUrl(avatar_url) : req.user.avatar_url,
     banner_color ?? null,
-    banner_url !== undefined ? banner_url : req.user.banner_url,
+    banner_url !== undefined ? sanitizeAssetUrl(banner_url) : req.user.banner_url,
     avatar_decoration ?? null,
     pronouns ?? null,
     name_color ?? null,
@@ -534,8 +548,9 @@ app.post('/api/channels/:channelId/messages', authMiddleware, (req, res) => {
   }
 
   const msgId = crypto.randomUUID();
+  const safeAtts = sanitizeAttachments(attachments);
   db.prepare('INSERT INTO messages (id, channel_id, author_id, content, attachments_json, reply_to_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-    msgId, channelId, req.user.id, String(content).trim(), JSON.stringify(attachments), reply_to_id, Date.now()
+    msgId, channelId, req.user.id, String(content).trim(), JSON.stringify(safeAtts), reply_to_id, Date.now()
   );
   const hydrated = hydrateMessage(db.prepare('SELECT * FROM messages WHERE id = ?').get(msgId));
   io.to(`channel:${channelId}`).emit('message:new', hydrated);
@@ -714,8 +729,9 @@ app.post('/api/dms/:threadId/messages', authMiddleware, (req, res) => {
     return res.status(400).json({ error: 'Mensagem vazia' });
   }
   const msgId = crypto.randomUUID();
+  const safeAtts = sanitizeAttachments(attachments);
   db.prepare('INSERT INTO messages (id, dm_thread_id, author_id, content, attachments_json, reply_to_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-    msgId, t.id, req.user.id, String(content).trim(), JSON.stringify(attachments), reply_to_id, Date.now()
+    msgId, t.id, req.user.id, String(content).trim(), JSON.stringify(safeAtts), reply_to_id, Date.now()
   );
   const hydrated = hydrateMessage(db.prepare('SELECT * FROM messages WHERE id = ?').get(msgId));
   io.to(`dm:${t.id}`).emit('message:new', hydrated);

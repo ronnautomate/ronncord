@@ -326,6 +326,10 @@ export class VoiceManager {
       systemAudio: 'include'
     });
     this.screenStream = stream;
+    // Resume mic AudioContext immediately in case Windows/Chrome audio service paused it during getDisplayMedia
+    if (this.pipeline?.context?.state === 'suspended') {
+      await this.pipeline.context.resume().catch(() => {});
+    }
     const videoTrack = stream.getVideoTracks()[0];
     if (videoTrack) videoTrack.onended = () => this.stopScreenShare();
 
@@ -497,8 +501,14 @@ export class VoiceManager {
     const audioEls = new Map();
 
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+      if (pc.iceConnectionState === 'failed') {
         try { pc.restartIce?.(); } catch {}
+      } else if (pc.iceConnectionState === 'disconnected') {
+        setTimeout(() => {
+          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+            try { pc.restartIce?.(); } catch {}
+          }
+        }, 4000);
       }
     };
 
