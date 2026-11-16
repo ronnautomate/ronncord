@@ -209,6 +209,16 @@ function App() {
           prev.map(s => (s.id === serverId ? { ...s, channels: s.channels.filter(c => c.id !== channelId) } : s))
         );
       });
+      socket.on('server:member_joined', ({ serverId, member }) => {
+        if (!member) return;
+        setServers(prev =>
+          prev.map(s =>
+            s.id === serverId && !s.members.some(m => m.id === member.id)
+              ? { ...s, members: [...s.members, member] }
+              : s
+          )
+        );
+      });
       socket.on('presence:update', ({
         userId, status, custom_status, display_name, avatar_color, avatar_url,
         avatar_decoration, banner_color, banner_url, pronouns, bio,
@@ -1198,7 +1208,12 @@ function App() {
             <>
               <h3 style={{ marginTop: 18 }}>OFFLINE — {offlineMembers.length}</h3>
               {offlineMembers.map(m => (
-                <div className="member offline" key={m.id} onClick={() => setSelectedProfile(m)}>
+                <div
+                  className={`member offline nameplate-${m.nameplate_style || 'none'}`}
+                  key={m.id}
+                  onClick={() => setSelectedProfile(m)}
+                  title="Clique para ver perfil"
+                >
                   <div className={`avatar deco-${m.avatar_decoration || 'none'}`} style={{ background: m.avatar_color }}>
                     {m.avatar_url ? (
                       <img src={resolveAssetUrl(m.avatar_url)} alt={m.display_name} className="avatar-img" />
@@ -1208,7 +1223,15 @@ function App() {
                     <span className="status-dot offline" />
                   </div>
                   <div className="member-info">
-                    <span>{m.display_name}</span>
+                    <div className="member-name">
+                      <span style={{ color: m.name_color || 'inherit' }}>{m.display_name}</span>
+                      {m.clan_tag && (
+                        <span className="clan-tag-pill sm">{m.clan_icon || '💀'} {m.clan_tag}</span>
+                      )}
+                      {m.role === 'owner' && <Crown size={12} className="role-crown" />}
+                      {m.role === 'admin' && <Shield size={12} className="role-admin" />}
+                    </div>
+                    {m.custom_status && <small>{m.custom_status}</small>}
                   </div>
                 </div>
               ))}

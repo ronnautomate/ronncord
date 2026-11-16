@@ -522,7 +522,8 @@ app.post('/api/servers/join/:inviteCode', authMiddleware, (req, res) => {
     srv.id, req.user.id, 'member', Date.now()
   );
   const full = getFullServersForUser(req.user.id).find(s => s.id === srv.id);
-  io.to(`server:${srv.id}`).emit('server:member_joined', { serverId: srv.id, user: req.user });
+  const memberObj = full?.members?.find(m => m.id === req.user.id) || { ...req.user, role: 'member' };
+  io.to(`server:${srv.id}`).emit('server:member_joined', { serverId: srv.id, member: memberObj });
   res.json({ server: full });
 });
 
