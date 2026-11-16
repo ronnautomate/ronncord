@@ -5,9 +5,10 @@ import {
   UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff,
   MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2
 } from 'lucide-react';
-import { apiFetch, connectSocket, getToken, setToken } from './lib/api.js';
+import { apiFetch, connectSocket, getToken, setToken, resolveAssetUrl } from './lib/api.js';
 import { VoiceManager } from './lib/voiceManager.js';
 import { getSavedVoiceSettings } from './lib/audioPipeline.js';
+import { SoundFX } from './lib/soundEffects.js';
 import { AuthScreen } from './components/AuthScreen.jsx';
 import { ChatArea } from './components/ChatArea.jsx';
 import { FriendsView } from './components/FriendsView.jsx';
@@ -15,7 +16,8 @@ import {
   CreateOrJoinServerModal,
   CreateChannelModal,
   InviteModal,
-  ProfileModal
+  ProfileModal,
+  UserProfileModal
 } from './components/Modals.jsx';
 import { VoiceSettingsModal } from './components/VoiceSettingsModal.jsx';
 import './style.css';
@@ -111,8 +113,11 @@ function App() {
   const [deafened, setDeafened] = useState(false);
 
   const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile' | 'voice-settings'
+  const [selectedProfile, setSelectedProfile] = useState(null);
   const socketRef = useRef(null);
   const voiceManagerRef = useRef(null);
+  const voiceChannelIdRef = useRef(null);
+  const voiceCountRef = useRef(0);
 
   const activeServer = useMemo(
     () => servers.find(s => s.id === activeServerId) || null,
@@ -175,6 +180,7 @@ function App() {
     socketRef.current = socket;
     if (socket) {
       socket.on('message:new', msg => {
+        if (msg.author_id !== user.id) SoundFX.message();
         setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
       });
       socket.on('message:updated', msg => {
@@ -193,7 +199,7 @@ function App() {
           prev.map(s => (s.id === serverId ? { ...s, channels: s.channels.filter(c => c.id !== channelId) } : s))
         );
       });
-      socket.on('presence:update', ({ userId, status, custom_status, display_name, avatar_color }) => {
+      socket.on('presence:update', ({ userId, status, custom_status, display_name, avatar_color, avatar_url, avatar_decoration, banner_color, pronouns, bio }) => {
         setServers(prev =>
           prev.map(s => ({
             ...s,
@@ -204,7 +210,12 @@ function App() {
                     status: status ?? m.status,
                     custom_status: custom_status ?? m.custom_status,
                     display_name: display_name ?? m.display_name,
-                    avatar_color: avatar_color ?? m.avatar_color
+                    avatar_color: avatar_color ?? m.avatar_color,
+                    avatar_url: avatar_url !== undefined ? avatar_url : m.avatar_url,
+                    avatar_decoration: avatar_decoration ?? m.avatar_decoration,
+                    banner_color: banner_color ?? m.banner_color,
+                    pronouns: pronouns ?? m.pronouns,
+                    bio: bio ?? m.bio
                   }
                 : m
             )
@@ -223,6 +234,12 @@ function App() {
         });
       });
       socket.on('voice:participants', ({ channelId, participants }) => {
+        if (voiceChannelIdRef.current === channelId) {
+          const prevCount = voiceCountRef.current;
+          if (participants.length > prevCount && prevCount > 0) SoundFX.userJoined();
+          else if (participants.length < prevCount && participants.length > 0) SoundFX.userLeft();
+          voiceCountRef.current = participants.length;
+        }
         setVoiceParticipants(prev => ({ ...prev, [channelId]: participants }));
       });
 
@@ -473,6 +490,9 @@ function App() {
       return;
     }
     if (voiceChannelId === ch.id) {
+      SoundFX.leaveVoice();
+      voiceChannelIdRef.current = null;
+      voiceCountRef.current = 0;
       await voiceManagerRef.current?.leave();
       setVoiceChannelId(null);
       setIsCameraOn(false);
@@ -480,10 +500,13 @@ function App() {
       setLocalCameraStream(null);
       setLocalScreenStream(null);
     } else {
+      voiceChannelIdRef.current = ch.id;
+      voiceCountRef.current = 0;
       await voiceManagerRef.current?.join(ch.id, voiceSettings);
       voiceManagerRef.current?.setMuted(muted);
       voiceManagerRef.current?.setDeafened(deafened);
       setVoiceChannelId(ch.id);
+      SoundFX.joinVoice();
     }
   }
 
@@ -493,11 +516,13 @@ function App() {
       await voiceManagerRef.current?.stopCamera();
       setIsCameraOn(false);
       setLocalCameraStream(null);
+      SoundFX.streamStop();
     } else {
       try {
         const stream = await voiceManagerRef.current?.startCamera();
         setIsCameraOn(true);
         setLocalCameraStream(stream || null);
+        SoundFX.streamStart();
       } catch (err) {
         alert('Não foi possível ligar a câmera: ' + err.message);
       }
@@ -510,11 +535,13 @@ function App() {
       await voiceManagerRef.current?.stopScreenShare();
       setIsScreenSharing(false);
       setLocalScreenStream(null);
+      SoundFX.streamStop();
     } else {
       try {
         const stream = await voiceManagerRef.current?.startScreenShare();
         setIsScreenSharing(true);
         setLocalScreenStream(stream || null);
+        SoundFX.streamStart();
       } catch (err) {
         if (err.name !== 'NotAllowedError') {
           alert('Erro ao compartilhar tela: ' + err.message);
@@ -527,12 +554,16 @@ function App() {
     const next = !muted;
     setMuted(next);
     voiceManagerRef.current?.setMuted(next);
+    if (next) SoundFX.mute();
+    else SoundFX.unmute();
   }
 
   function handleToggleDeafen() {
     const next = !deafened;
     setDeafened(next);
     voiceManagerRef.current?.setDeafened(next);
+    if (next) SoundFX.deafen();
+    else SoundFX.undeafen();
   }
 
   if (booting) {
@@ -751,6 +782,9 @@ function App() {
                 className="icon-btn danger"
                 title="Desconectar"
                 onClick={async () => {
+                  SoundFX.leaveVoice();
+                  voiceChannelIdRef.current = null;
+                  voiceCountRef.current = 0;
                   await voiceManagerRef.current?.leave();
                   setVoiceChannelId(null);
                   setIsCameraOn(false);
@@ -767,8 +801,12 @@ function App() {
 
         <div className="user-panel">
           <div className="user-panel-left" onClick={() => setModal('profile')}>
-            <div className={`avatar ${isSpeaking ? 'speaking-ring' : ''}`} style={{ background: user.avatar_color }}>
-              {(user.display_name || user.username)[0].toUpperCase()}
+            <div className={`avatar ${isSpeaking ? 'speaking-ring' : ''} deco-${user.avatar_decoration || 'none'}`} style={{ background: user.avatar_color }}>
+              {user.avatar_url ? (
+                <img src={resolveAssetUrl(user.avatar_url)} alt={user.display_name} className="avatar-img" />
+              ) : (
+                (user.display_name || user.username)[0].toUpperCase()
+              )}
               <span className={`status-dot ${user.status}`} />
             </div>
             <div className="user-details">
@@ -876,6 +914,7 @@ function App() {
           onDeleteMessage={handleDeleteMessage}
           onToggleReaction={handleToggleReaction}
           onUploadFile={handleUploadFile}
+          onSelectUser={setSelectedProfile}
           onTyping={isTyping =>
             socketRef.current?.emit(isTyping ? 'typing_start' : 'typing_stop', { channelId: activeChannel.id })
           }
@@ -893,6 +932,7 @@ function App() {
           onDeleteMessage={handleDeleteMessage}
           onToggleReaction={handleToggleReaction}
           onUploadFile={handleUploadFile}
+          onSelectUser={setSelectedProfile}
           onTyping={isTyping =>
             socketRef.current?.emit(isTyping ? 'typing_start' : 'typing_stop', { dmThreadId: activeDm.id })
           }
@@ -927,9 +967,13 @@ function App() {
         <aside className="members">
           <h3>ONLINE — {onlineMembers.length}</h3>
           {onlineMembers.map(m => (
-            <div className="member" key={m.id} onClick={() => handleOpenDM(m.id)} title="Clique para enviar DM">
-              <div className="avatar" style={{ background: m.avatar_color }}>
-                {(m.display_name || m.username)[0].toUpperCase()}
+            <div className="member" key={m.id} onClick={() => setSelectedProfile(m)} title="Clique para ver perfil">
+              <div className={`avatar deco-${m.avatar_decoration || 'none'}`} style={{ background: m.avatar_color }}>
+                {m.avatar_url ? (
+                  <img src={resolveAssetUrl(m.avatar_url)} alt={m.display_name} className="avatar-img" />
+                ) : (
+                  (m.display_name || m.username)[0].toUpperCase()
+                )}
                 <span className={`status-dot ${m.status}`} />
               </div>
               <div className="member-info">
@@ -947,9 +991,13 @@ function App() {
             <>
               <h3 style={{ marginTop: 18 }}>OFFLINE — {offlineMembers.length}</h3>
               {offlineMembers.map(m => (
-                <div className="member offline" key={m.id} onClick={() => handleOpenDM(m.id)}>
-                  <div className="avatar" style={{ background: m.avatar_color }}>
-                    {(m.display_name || m.username)[0].toUpperCase()}
+                <div className="member offline" key={m.id} onClick={() => setSelectedProfile(m)}>
+                  <div className={`avatar deco-${m.avatar_decoration || 'none'}`} style={{ background: m.avatar_color }}>
+                    {m.avatar_url ? (
+                      <img src={resolveAssetUrl(m.avatar_url)} alt={m.display_name} className="avatar-img" />
+                    ) : (
+                      (m.display_name || m.username)[0].toUpperCase()
+                    )}
                     <span className="status-dot offline" />
                   </div>
                   <div className="member-info">
@@ -985,7 +1033,16 @@ function App() {
           user={user}
           onClose={() => setModal(null)}
           onSave={handleSaveProfile}
+          onUploadAvatar={handleUploadFile}
           onLogout={handleLogout}
+        />
+      )}
+      {selectedProfile && (
+        <UserProfileModal
+          member={selectedProfile}
+          currentUserId={user.id}
+          onClose={() => setSelectedProfile(null)}
+          onSendDM={handleOpenDM}
         />
       )}
       {modal === 'voice-settings' && (

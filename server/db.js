@@ -111,6 +111,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_channels_server ON channels(server_id, position);
 `);
 
+// Safe migrations for existing databases
+for (const col of [
+  "ALTER TABLE users ADD COLUMN banner_color TEXT NOT NULL DEFAULT '#5865F2'",
+  "ALTER TABLE users ADD COLUMN avatar_decoration TEXT NOT NULL DEFAULT 'none'",
+  "ALTER TABLE users ADD COLUMN pronouns TEXT NOT NULL DEFAULT ''"
+]) {
+  try { db.exec(col); } catch {}
+}
+
 export function sanitizeUser(u) {
   if (!u) return null;
   const { password_hash, ...rest } = u;

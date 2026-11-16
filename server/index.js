@@ -90,7 +90,7 @@ function authMiddleware(req, res, next) {
 
 function hydrateMessage(msg) {
   if (!msg) return null;
-  const author = db.prepare('SELECT id, username, display_name, avatar_color, avatar_url, status FROM users WHERE id = ?').get(msg.author_id);
+  const author = db.prepare('SELECT id, username, display_name, avatar_color, avatar_url, avatar_decoration, banner_color, pronouns, bio, custom_status, status FROM users WHERE id = ?').get(msg.author_id);
   const reactionRows = db.prepare('SELECT emoji, user_id FROM reactions WHERE message_id = ?').all(msg.id);
   const grouped = {};
   for (const r of reactionRows) {
@@ -173,7 +173,7 @@ function getFullServersForUser(userId) {
   return servers.map(s => {
     const channels = db.prepare('SELECT * FROM channels WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(s.id);
     const members = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_color, u.avatar_url, u.status, u.custom_status, u.bio, sm.role
+      SELECT u.id, u.username, u.display_name, u.avatar_color, u.avatar_url, u.avatar_decoration, u.banner_color, u.pronouns, u.status, u.custom_status, u.bio, sm.role
       FROM server_members sm
       JOIN users u ON u.id = sm.user_id
       WHERE sm.server_id = ?
@@ -238,7 +238,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
 });
 
 app.patch('/api/auth/profile', authMiddleware, (req, res) => {
-  const { display_name, status, custom_status, bio, avatar_color, avatar_url } = req.body || {};
+  const { display_name, status, custom_status, bio, avatar_color, avatar_url, banner_color, avatar_decoration, pronouns } = req.body || {};
   db.prepare(`
     UPDATE users SET
       display_name = COALESCE(?, display_name),
@@ -246,7 +246,10 @@ app.patch('/api/auth/profile', authMiddleware, (req, res) => {
       custom_status = COALESCE(?, custom_status),
       bio = COALESCE(?, bio),
       avatar_color = COALESCE(?, avatar_color),
-      avatar_url = COALESCE(?, avatar_url)
+      avatar_url = COALESCE(?, avatar_url),
+      banner_color = COALESCE(?, banner_color),
+      avatar_decoration = COALESCE(?, avatar_decoration),
+      pronouns = COALESCE(?, pronouns)
     WHERE id = ?
   `).run(
     display_name ?? null,
@@ -255,6 +258,9 @@ app.patch('/api/auth/profile', authMiddleware, (req, res) => {
     bio ?? null,
     avatar_color ?? null,
     avatar_url ?? null,
+    banner_color ?? null,
+    avatar_decoration ?? null,
+    pronouns ?? null,
     req.user.id
   );
   const updated = sanitizeUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id));
@@ -263,7 +269,12 @@ app.patch('/api/auth/profile', authMiddleware, (req, res) => {
     status: updated.status,
     custom_status: updated.custom_status,
     display_name: updated.display_name,
-    avatar_color: updated.avatar_color
+    avatar_color: updated.avatar_color,
+    avatar_url: updated.avatar_url,
+    avatar_decoration: updated.avatar_decoration,
+    banner_color: updated.banner_color,
+    pronouns: updated.pronouns,
+    bio: updated.bio
   });
   res.json({ user: updated });
 });

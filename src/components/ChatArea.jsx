@@ -4,6 +4,7 @@ import {
   Reply, Pencil, Trash2, X, Paperclip, FileText
 } from 'lucide-react';
 import { resolveAssetUrl } from '../lib/api.js';
+import { GifPicker } from './GifPicker.jsx';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '🚀', '👀', '🎉', '💯'];
 
@@ -49,7 +50,8 @@ export function ChatArea({
   onDeleteMessage,
   onToggleReaction,
   onUploadFile,
-  onTyping
+  onTyping,
+  onSelectUser
 }) {
   const [text, setText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -59,6 +61,7 @@ export function ChatArea({
   const [attachments, setAttachments] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showGifPicker, setShowGifPicker] = useState(false);
   const [reactingMsgId, setReactingMsgId] = useState(null);
 
   const bottomRef = useRef(null);
@@ -193,8 +196,16 @@ export function ChatArea({
 
               <div className="message-row">
                 {!grouped ? (
-                  <div className="avatar message-avatar" style={{ background: avatarColor }}>
-                    {authorName[0].toUpperCase()}
+                  <div
+                    className={`avatar message-avatar clickable deco-${msg.author?.avatar_decoration || 'none'}`}
+                    style={{ background: avatarColor }}
+                    onClick={() => onSelectUser?.(msg.author)}
+                  >
+                    {msg.author?.avatar_url ? (
+                      <img src={resolveAssetUrl(msg.author.avatar_url)} alt={authorName} className="avatar-img" />
+                    ) : (
+                      authorName[0].toUpperCase()
+                    )}
                   </div>
                 ) : (
                   <div className="message-time-gutter">{formatTime(msg.created_at)}</div>
@@ -203,7 +214,7 @@ export function ChatArea({
                 <div className="message-body">
                   {!grouped && (
                     <div className="message-meta">
-                      <strong>{authorName}</strong>
+                      <strong className="clickable" onClick={() => onSelectUser?.(msg.author)}>{authorName}</strong>
                       <small>{formatTime(msg.created_at)}</small>
                     </div>
                   )}
@@ -375,9 +386,30 @@ export function ChatArea({
           <div style={{ position: 'relative' }}>
             <button
               type="button"
+              className={`gif-btn ${showGifPicker ? 'active' : ''}`}
+              title="Enviar GIF"
+              onClick={() => { setShowGifPicker(v => !v); setShowEmojiPicker(false); }}
+            >
+              GIF
+            </button>
+            {showGifPicker && (
+              <GifPicker
+                onClose={() => setShowGifPicker(false)}
+                onSelectGif={async gif => {
+                  setShowGifPicker(false);
+                  await onSendMessage({ content: '', attachments: [gif], reply_to_id: replyTo?.id || null });
+                  setReplyTo(null);
+                }}
+              />
+            )}
+          </div>
+
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
               className="icon-btn"
               title="Emoji"
-              onClick={() => setShowEmojiPicker(v => !v)}
+              onClick={() => { setShowEmojiPicker(v => !v); setShowGifPicker(false); }}
             >
               <Smile size={20} />
             </button>
