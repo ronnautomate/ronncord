@@ -181,8 +181,8 @@ export class VoiceManager {
     this.pipeline.setMuted(this.muted);
 
     const newAudioTrack = this.pipeline.stream.getAudioTracks()[0];
-    for (const { pc } of this.peers.values()) {
-      const sender = pc.getSenders().find(s => s.track?.kind === 'audio');
+    for (const peer of this.peers.values()) {
+      const sender = peer.micSender || peer.pc.getSenders().find(s => s.track?.kind === 'audio');
       if (sender && newAudioTrack) {
         await sender.replaceTrack(newAudioTrack);
       }
@@ -530,10 +530,11 @@ export class VoiceManager {
 
   async _createPeerConnection(targetSocketId, displayName, userId = targetSocketId) {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    let micSender = null;
 
     if (this.pipeline?.stream) {
       this.pipeline.stream.getAudioTracks().forEach(track => {
-        pc.addTrack(track, this.pipeline.stream);
+        micSender = pc.addTrack(track, this.pipeline.stream);
       });
     }
     if (this.cameraStream) {
@@ -589,6 +590,7 @@ export class VoiceManager {
     const audioEls = new Map();
     const gainNodes = new Map();
     const screenGainNodes = new Map();
+    let micStreamId = null;
 
     pc.oniceconnectionstatechange = () => {
       if (pc.iceConnectionState === 'failed') {
@@ -632,9 +634,13 @@ export class VoiceManager {
 
         const srcNode = this.playbackCtx.createMediaStreamSource(trackStream);
         const gainNode = this.playbackCtx.createGain();
-        // Screen-share audio either shares a MediaStream with a video track or arrives after the mic track
+        const incomingStreamId = event.streams?.[0]?.id || null;
+        if (!micStreamId && !(event.streams?.[0]?.getVideoTracks?.().length > 0)) {
+          micStreamId = incomingStreamId;
+        }
         const isScreenAudio =
           (event.streams?.[0]?.getVideoTracks?.().length > 0) ||
+          (micStreamId && incomingStreamId && incomingStreamId !== micStreamId) ||
           gainNodes.size > 0;
         if (isScreenAudio) {
           gainNode.gain.value = (this.deafened || this.screenAudioMuted.has(targetSocketId)) ? 0 : 1;
@@ -683,7 +689,7 @@ export class VoiceManager {
       }
     };
 
-    this.peers.set(targetSocketId, { pc, audioEls, gainNodes, screenGainNodes, userId, displayName, pendingCandidates: [] });
+    this.peers.set(targetSocketId, { pc, micSender, audioEls, gainNodes, screenGainNodes, userId, displayName, pendingCandidates: [] });
     return pc;
   }
 

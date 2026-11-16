@@ -301,7 +301,10 @@ function App() {
       voiceManagerRef.current = new VoiceManager(socket, {
         onPing: setVoicePing,
         onSpeakingChange: setIsSpeaking,
-        onRemoteVideos: setRemoteVideos,
+        onRemoteVideos: videos => {
+          setRemoteVideos(videos);
+          setHiddenVideoIds(prev => prev.filter(id => videos.some(v => v.id === id)));
+        },
         onError: msg => alert(msg)
       });
     }
@@ -1000,6 +1003,14 @@ function App() {
 
       {/* Main Content */}
       <div className="main-stage">
+        {hiddenVideoIds.length > 0 && remoteVideos.some(v => hiddenVideoIds.includes(v.id)) && (
+          <div style={{ background: '#1e1f22', padding: '6px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+            <span style={{ color: 'var(--text-muted)' }}>Transmissão ocultada ({hiddenVideoIds.length})</span>
+            <button type="button" className="btn-primary xs" onClick={() => setHiddenVideoIds([])}>
+              Mostrar Transmissão
+            </button>
+          </div>
+        )}
         {(localCameraStream || localScreenStream || remoteVideos.some(v => !hiddenVideoIds.includes(v.id))) && (
           <div className="screen-share-stage">
             {localCameraStream && (
