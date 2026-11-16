@@ -237,9 +237,11 @@ export class VoiceManager {
     if (isMuted) this.screenAudioMuted.add(socketId);
     else this.screenAudioMuted.delete(socketId);
     const peer = this.peers.get(socketId);
-    if (peer?.screenGainNodes) {
-      for (const gain of peer.screenGainNodes.values()) {
-        gain.gain.value = (this.deafened || isMuted) ? 0 : 1;
+    if (!peer) return;
+    const shouldMute = this.deafened || isMuted;
+    if (peer.screenAudioEls) {
+      for (const sEl of peer.screenAudioEls.values()) {
+        sEl.muted = shouldMute;
       }
     }
   }
@@ -247,15 +249,21 @@ export class VoiceManager {
   setDeafened(deafened) {
     this.deafened = deafened;
     const vols = getSavedUserVolumes();
-    for (const peer of this.peers.values()) {
-      const targetGain = deafened ? 0 : ((vols[peer.userId] ?? 100) / 100);
+    for (const [sid, peer] of this.peers.entries()) {
+      const vol = vols[peer.userId] ?? 100;
+      const useBoost = vol > 100;
+      for (const audioEl of peer.audioEls.values()) {
+        audioEl.muted = deafened || useBoost || vol === 0;
+        if (!useBoost) audioEl.volume = Math.min(1, vol / 100);
+      }
       if (peer.gainNodes) {
         for (const gain of peer.gainNodes.values()) {
-          gain.gain.value = targetGain;
+          gain.gain.value = (deafened || !useBoost) ? 0 : (vol / 100);
         }
       }
-      for (const audioEl of peer.audioEls.values()) {
-        audioEl.muted = true; // audio plays via GainNode for 0-200% boost
+      const scrMuted = deafened || this.screenAudioMuted.has(sid);
+      for (const sEl of (peer.screenAudioEls?.values() || [])) {
+        sEl.muted = scrMuted;
       }
     }
     if (this.channelId) {
@@ -269,10 +277,17 @@ export class VoiceManager {
       this.playbackCtx.resume().catch(() => {});
     }
     if (this.deafened) return clamped;
+    const useBoost = clamped > 100;
     for (const peer of this.peers.values()) {
-      if (peer.userId === userId && peer.gainNodes) {
-        for (const gain of peer.gainNodes.values()) {
-          gain.gain.value = clamped / 100;
+      if (peer.userId === userId) {
+        for (const audioEl of peer.audioEls.values()) {
+          audioEl.muted = useBoost || clamped === 0;
+          if (!useBoost) audioEl.volume = Math.min(1, clamped / 100);
+        }
+        if (peer.gainNodes) {
+          for (const gain of peer.gainNodes.values()) {
+            gain.gain.value = useBoost ? (clamped / 100) : 0;
+          }
         }
       }
     }
@@ -289,25 +304,34 @@ export class VoiceManager {
 
     for (const [sid, peer] of this.peers.entries()) {
       let videoSender = null;
+      let audioSender = null;
       if (videoTrack) {
-        this.socket?.emit('webrtc:signal', {
-          targetSocketId: sid,
-          channelId: this.channelId,
-          signal: { type: 'track-meta', trackId: videoTrack.id, streamKind }
-        });
         videoSender = peer.pc.addTrack(videoTrack, stream);
       }
       if (audioTrack) {
-        this.socket?.emit('webrtc:signal', {
-          targetSocketId: sid,
-          channelId: this.channelId,
-          signal: { type: 'track-meta', trackId: audioTrack.id, streamKind: 'screen-audio' }
-        });
-        peer.pc.addTrack(audioTrack, stream);
+        audioSender = peer.pc.addTrack(audioTrack, stream);
       }
       await this._renegotiatePeer(sid, peer.pc);
       if (videoSender) {
+        const vTrans = peer.pc.getTransceivers().find(t => t.sender === videoSender);
+        if (vTrans?.mid) {
+          this.socket?.emit('webrtc:signal', {
+            targetSocketId: sid,
+            channelId: this.channelId,
+            signal: { type: 'mid-meta', mid: vTrans.mid, streamKind }
+          });
+        }
         await tuneVideoSender(videoSender);
+      }
+      if (audioSender) {
+        const aTrans = peer.pc.getTransceivers().find(t => t.sender === audioSender);
+        if (aTrans?.mid) {
+          this.socket?.emit('webrtc:signal', {
+            targetSocketId: sid,
+            channelId: this.channelId,
+            signal: { type: 'mid-meta', mid: aTrans.mid, streamKind: 'screen-audio' }
+          });
+        }
       }
     }
   }
@@ -464,6 +488,16 @@ export class VoiceManager {
       }
       return;
     }
+    if (signal.type === 'mid-meta') {
+      this.trackMetaMap.set(`mid:${fromSocketId}:${signal.mid}`, signal.streamKind);
+      for (const v of this.remoteVideos.values()) {
+        if (v.socketId === fromSocketId && v.mid === signal.mid) {
+          v.kind = signal.streamKind;
+          this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
+        }
+      }
+      return;
+    }
     if (signal.type === 'track-removed') {
       this.remoteVideos.delete(`${fromSocketId}:${signal.trackId}`);
       this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
@@ -588,8 +622,8 @@ export class VoiceManager {
     })();
 
     const audioEls = new Map();
+    const screenAudioEls = new Map();
     const gainNodes = new Map();
-    const screenGainNodes = new Map();
     let micStreamId = null;
 
     pc.oniceconnectionstatechange = () => {
@@ -615,13 +649,40 @@ export class VoiceManager {
 
       if (event.track.kind === 'audio') {
         const trackStream = new MediaStream([event.track]);
+        const midKey = event.transceiver?.mid ? `mid:${targetSocketId}:${event.transceiver.mid}` : null;
+        const incomingStreamId = event.streams?.[0]?.id || null;
+        if (!micStreamId && !(event.streams?.[0]?.getVideoTracks?.().length > 0)) {
+          micStreamId = incomingStreamId;
+        }
+        const isScreenAudio =
+          (midKey && this.trackMetaMap.get(midKey) === 'screen-audio') ||
+          (event.streams?.[0]?.getVideoTracks?.().length > 0) ||
+          (micStreamId && incomingStreamId && incomingStreamId !== micStreamId) ||
+          audioEls.size > 0;
+
         const audioEl = document.createElement('audio');
         audioEl.autoplay = true;
         audioEl.playsInline = true;
-        // Keep element muted so WebAudio GainNode handles 0-200% boost without echo
-        audioEl.muted = true;
         audioEl.srcObject = trackStream;
         audioPool.appendChild(audioEl);
+
+        if (isScreenAudio) {
+          audioEl.muted = this.deafened || this.screenAudioMuted.has(targetSocketId);
+          audioEl.volume = 1.0;
+          screenAudioEls.set(event.track.id, audioEl);
+          audioEl.play().catch(() => {});
+          event.track.onended = () => {
+            audioEl.srcObject = null;
+            audioEl.remove();
+            screenAudioEls.delete(event.track.id);
+          };
+          return;
+        }
+
+        const savedVol = getSavedUserVolumes()[userId] ?? 100;
+        const useBoost = savedVol > 100;
+        audioEl.muted = this.deafened || useBoost || savedVol === 0;
+        audioEl.volume = useBoost ? 1.0 : Math.min(1, savedVol / 100);
         audioEls.set(event.track.id, audioEl);
 
         if (!this.playbackCtx) {
@@ -634,24 +695,10 @@ export class VoiceManager {
 
         const srcNode = this.playbackCtx.createMediaStreamSource(trackStream);
         const gainNode = this.playbackCtx.createGain();
-        const incomingStreamId = event.streams?.[0]?.id || null;
-        if (!micStreamId && !(event.streams?.[0]?.getVideoTracks?.().length > 0)) {
-          micStreamId = incomingStreamId;
-        }
-        const isScreenAudio =
-          (event.streams?.[0]?.getVideoTracks?.().length > 0) ||
-          (micStreamId && incomingStreamId && incomingStreamId !== micStreamId) ||
-          gainNodes.size > 0;
-        if (isScreenAudio) {
-          gainNode.gain.value = (this.deafened || this.screenAudioMuted.has(targetSocketId)) ? 0 : 1;
-          screenGainNodes.set(event.track.id, gainNode);
-        } else {
-          const savedVol = getSavedUserVolumes()[userId] ?? 100;
-          gainNode.gain.value = this.deafened ? 0 : (savedVol / 100);
-          gainNodes.set(event.track.id, gainNode);
-        }
+        gainNode.gain.value = (this.deafened || !useBoost) ? 0 : (savedVol / 100);
         srcNode.connect(gainNode);
         gainNode.connect(this.playbackCtx.destination);
+        gainNodes.set(event.track.id, gainNode);
 
         audioEl.play().catch(() => {
           const unlock = () => {
@@ -672,11 +719,13 @@ export class VoiceManager {
       } else if (event.track.kind === 'video') {
         const remoteStream = event.streams?.[0] || new MediaStream([event.track]);
         const key = `${targetSocketId}:${event.track.id}`;
-        const kind = this.trackMetaMap.get(event.track.id) || 'screen';
+        const midKey = event.transceiver?.mid ? `mid:${targetSocketId}:${event.transceiver.mid}` : null;
+        const kind = (midKey && this.trackMetaMap.get(midKey)) || this.trackMetaMap.get(event.track.id) || 'screen';
         this.remoteVideos.set(key, {
           id: key,
           socketId: targetSocketId,
           trackId: event.track.id,
+          mid: event.transceiver?.mid || null,
           kind,
           displayName,
           stream: remoteStream
@@ -689,7 +738,7 @@ export class VoiceManager {
       }
     };
 
-    this.peers.set(targetSocketId, { pc, micSender, audioEls, gainNodes, screenGainNodes, userId, displayName, pendingCandidates: [] });
+    this.peers.set(targetSocketId, { pc, micSender, audioEls, screenAudioEls, gainNodes, userId, displayName, pendingCandidates: [] });
     return pc;
   }
 
@@ -703,6 +752,13 @@ export class VoiceManager {
         audioEl.remove();
       }
       peer.audioEls.clear();
+    }
+    if (peer.screenAudioEls) {
+      for (const sEl of peer.screenAudioEls.values()) {
+        sEl.srcObject = null;
+        sEl.remove();
+      }
+      peer.screenAudioEls.clear();
     }
     this.peers.delete(socketId);
     let changed = false;

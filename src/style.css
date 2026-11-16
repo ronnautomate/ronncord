@@ -2201,8 +2201,12 @@ body {
   right: 8px;
   display: flex;
   gap: 6px;
-  opacity: 0;
+  opacity: 0.85;
   transition: opacity 0.15s;
+}
+
+.screen-tile-controls .screen-fullscreen-btn {
+  opacity: 1;
 }
 
 .screen-tile:hover .screen-tile-controls {
