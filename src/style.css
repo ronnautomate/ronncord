@@ -2381,3 +2381,156 @@ body {
   color: var(--text-muted);
   margin-left: auto;
 }
+
+/* High-Impact CSS Profile Effects Upgrade + Notes Vault + Music Bot */
+.fullscreen-fx-overlay {
+  opacity: 0.92 !important;
+}
+
+.effect-cyber-glitch {
+  box-shadow: 0 0 42px rgba(0, 229, 255, 0.55), 0 0 80px rgba(236, 72, 153, 0.3), inset 0 0 35px rgba(0, 229, 255, 0.25) !important;
+}
+.effect-cyber-glitch .profile-fx-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(125deg, transparent 35%, rgba(0, 229, 255, 0.25) 50%, rgba(236, 72, 153, 0.25) 55%, transparent 70%);
+  animation: fxCyberSweep 2.6s ease-in-out infinite;
+}
+@keyframes fxCyberSweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.effect-sakura-glow {
+  box-shadow: 0 0 45px rgba(236, 72, 153, 0.6), 0 0 90px rgba(168, 85, 247, 0.35), inset 0 0 40px rgba(236, 72, 153, 0.28) !important;
+}
+.effect-sakura-glow .profile-fx-overlay::after {
+  content: '🌸   ✦   🌸   ✧   🌸';
+  position: absolute;
+  top: -24px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 22px;
+  letter-spacing: 22px;
+  animation: fxFloatDown 3.4s linear infinite 1.4s;
+}
+
+.effect-crimson-thunder {
+  box-shadow: 0 0 48px rgba(239, 68, 68, 0.65), 0 0 95px rgba(245, 158, 11, 0.35), inset 0 0 40px rgba(239, 68, 68, 0.3) !important;
+}
+
+.effect-galaxy-portal {
+  box-shadow: 0 0 50px rgba(139, 92, 246, 0.65), 0 0 100px rgba(56, 189, 248, 0.35), inset 0 0 42px rgba(139, 92, 246, 0.32) !important;
+}
+.effect-galaxy-portal .profile-fx-overlay::after {
+  content: '';
+  position: absolute;
+  bottom: -70px;
+  left: -70px;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: conic-gradient(from 180deg, transparent, rgba(56, 189, 248, 0.45), rgba(168, 85, 247, 0.45), transparent);
+  animation: fxOrbit 4.5s linear infinite reverse;
+}
+
+.effect-matrix-rain {
+  box-shadow: 0 0 46px rgba(35, 165, 89, 0.65), 0 0 90px rgba(16, 185, 129, 0.3), inset 0 0 36px rgba(35, 165, 89, 0.28) !important;
+}
+.effect-matrix-rain .profile-fx-overlay::after {
+  content: '01 10 11 01 00 11 10 01';
+  position: absolute;
+  top: -20px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: #57F287;
+  font-family: Consolas, monospace;
+  font-size: 14px;
+  letter-spacing: 8px;
+  text-shadow: 0 0 10px #23a559;
+  animation: fxFloatDown 2.8s linear infinite;
+}
+
+.notes-layout {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 12px;
+}
+
+.notes-sidebar {
+  background: var(--bg-rail);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.note-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.note-list-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.note-list-item.active {
+  background: var(--bg-selected);
+  color: #fff;
+}
+
+.note-list-item span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notes-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notes-editor input,
+.notes-editor textarea {
+  background: var(--bg-rail);
+  border: 1px solid #35373c;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.music-now-playing {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-sidebar);
+  border: 1px solid #3f4147;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.music-now-playing strong {
+  display: block;
+  font-size: 14px;
+}
+
+.music-now-playing small {
+  color: var(--text-muted);
+  font-size: 12px;
+}

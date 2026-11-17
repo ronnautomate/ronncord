@@ -843,8 +843,81 @@ app.post('/api/dms/:threadId/messages', authMiddleware, async (req, res) => {
   res.status(201).json({ message: hydrated });
 });
 
-// Socket.IO Real-Time + Voice Signaling
+// Private Encrypted Notes (AES-256-GCM, strict user_id isolation)
+app.get('/api/notes', authMiddleware, async (req, res) => {
+  const rows = await db.all(
+    'SELECT id, title, content, updated_at FROM private_notes WHERE user_id = ? ORDER BY updated_at DESC',
+    req.user.id
+  );
+  res.json({
+    notes: rows.map(n => ({
+      id: n.id,
+      title: decryptMessageText(n.title),
+      content: decryptMessageText(n.content),
+      updated_at: n.updated_at
+    }))
+  });
+});
+
+app.post('/api/notes', authMiddleware, async (req, res) => {
+  const { id, title = 'Sem título', content = '' } = req.body || {};
+  const cleanTitle = String(title).trim().slice(0, 120) || 'Sem título';
+  const cleanContent = String(content).slice(0, 10000);
+  const now = Date.now();
+
+  if (id) {
+    const existing = await db.get('SELECT id FROM private_notes WHERE id = ? AND user_id = ?', id, req.user.id);
+    if (!existing) return res.status(403).json({ error: 'Nota não encontrada ou sem acesso' });
+    await db.run(
+      'UPDATE private_notes SET title = ?, content = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+      encryptMessageText(cleanTitle),
+      encryptMessageText(cleanContent),
+      now,
+      id,
+      req.user.id
+    );
+    return res.json({ note: { id, title: cleanTitle, content: cleanContent, updated_at: now } });
+  }
+
+  const noteId = crypto.randomUUID();
+  await db.run(
+    'INSERT INTO private_notes (id, user_id, title, content, updated_at) VALUES (?, ?, ?, ?, ?)',
+    noteId,
+    req.user.id,
+    encryptMessageText(cleanTitle),
+    encryptMessageText(cleanContent),
+    now
+  );
+  res.status(201).json({ note: { id: noteId, title: cleanTitle, content: cleanContent, updated_at: now } });
+});
+
+app.delete('/api/notes/:id', authMiddleware, async (req, res) => {
+  await db.run('DELETE FROM private_notes WHERE id = ? AND user_id = ?', req.params.id, req.user.id);
+  res.json({ ok: true });
+});
+
+// Socket.IO Real-Time + Voice Signaling + Music Bot
 const voiceRooms = new Map();
+const musicRooms = new Map(); // channelId -> { queue: [{ id, title, url, requestedBy }], playing: boolean, currentIndex: number, startedAt: number }
+
+const MUSIC_PRESETS = [
+  { key: 'lofi', title: 'Lofi Hip Hop Beats (Rádio 24/7)', url: 'https://streams.ilovemusic.de/iloveradio17.mp3' },
+  { key: 'chill', title: 'Chillout & Ambient Mix', url: 'https://streams.ilovemusic.de/iloveradio7.mp3' },
+  { key: 'synthwave', title: 'Synthwave & Gaming Electro', url: 'https://streams.ilovemusic.de/iloveradio2.mp3' },
+  { key: 'rock', title: 'Rock & Metal Arena', url: 'https://streams.ilovemusic.de/iloveradio4.mp3' },
+  { key: 'hiphop', title: 'Hip Hop & Trap Beats', url: 'https://streams.ilovemusic.de/iloveradio3.mp3' }
+];
+
+function resolveMusicTrack(query, requestedBy) {
+  const q = String(query || '').trim();
+  if (!q) return null;
+  if (/^https?:\/\//i.test(q)) {
+    return { id: crypto.randomUUID(), title: q.split('/').pop()?.slice(0, 48) || 'Faixa Personalizada', url: q, requestedBy };
+  }
+  const lower = q.toLowerCase();
+  const match = MUSIC_PRESETS.find(p => p.key === lower || p.title.toLowerCase().includes(lower)) || MUSIC_PRESETS[0];
+  return { id: crypto.randomUUID(), title: match.title, url: match.url, requestedBy };
+}
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token;
@@ -952,6 +1025,59 @@ io.on('connection', async (socket) => {
 
     socket.emit('voice:peers', { channelId, peers: existingPeers });
     io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
+    const mState = musicRooms.get(channelId);
+    if (mState) socket.emit('music:state', { channelId, ...mState });
+  });
+
+  socket.on('music:play', ({ channelId, query }) => {
+    const room = voiceRooms.get(channelId);
+    if (!room || !room.has(socket.id)) return;
+    const track = resolveMusicTrack(query, socket.user.display_name);
+    if (!track) return;
+    let state = musicRooms.get(channelId);
+    if (!state) {
+      state = { queue: [track], currentIndex: 0, playing: true, startedAt: Date.now() };
+      musicRooms.set(channelId, state);
+    } else {
+      state.queue.push(track);
+      if (!state.playing) {
+        state.currentIndex = state.queue.length - 1;
+        state.playing = true;
+        state.startedAt = Date.now();
+      }
+    }
+    io.to(`voice:${channelId}`).emit('music:state', { channelId, ...state });
+  });
+
+  socket.on('music:toggle', ({ channelId }) => {
+    const room = voiceRooms.get(channelId);
+    const state = musicRooms.get(channelId);
+    if (!room || !room.has(socket.id) || !state) return;
+    state.playing = !state.playing;
+    io.to(`voice:${channelId}`).emit('music:state', { channelId, ...state });
+  });
+
+  socket.on('music:skip', ({ channelId }) => {
+    const room = voiceRooms.get(channelId);
+    const state = musicRooms.get(channelId);
+    if (!room || !room.has(socket.id) || !state) return;
+    if (state.currentIndex + 1 < state.queue.length) {
+      state.currentIndex += 1;
+      state.playing = true;
+      state.startedAt = Date.now();
+    } else {
+      musicRooms.delete(channelId);
+      io.to(`voice:${channelId}`).emit('music:state', { channelId, queue: [], currentIndex: 0, playing: false });
+      return;
+    }
+    io.to(`voice:${channelId}`).emit('music:state', { channelId, ...state });
+  });
+
+  socket.on('music:stop', ({ channelId }) => {
+    const room = voiceRooms.get(channelId);
+    if (!room || !room.has(socket.id)) return;
+    musicRooms.delete(channelId);
+    io.to(`voice:${channelId}`).emit('music:state', { channelId, queue: [], currentIndex: 0, playing: false });
   });
 
   socket.on('voice:state', ({ channelId, muted, deafened, speaking, cameraOn, screenSharing }) => {

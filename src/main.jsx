@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import {
   Hash, Volume2, VolumeX, Plus, Settings, Mic, MicOff, Headphones, HeadphoneOff,
   UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff,
-  MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2, X
+  MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2, X,
+  Lock, Music
 } from 'lucide-react';
 import { apiFetch, connectSocket, getToken, setToken, resolveAssetUrl } from './lib/api.js';
 import { VoiceManager, getSavedUserVolumes } from './lib/voiceManager.js';
@@ -21,6 +22,8 @@ import {
   NewDmModal
 } from './components/Modals.jsx';
 import { VoiceSettingsModal } from './components/VoiceSettingsModal.jsx';
+import { NotesModal } from './components/NotesModal.jsx';
+import { MusicModal } from './components/MusicModal.jsx';
 import './style.css';
 
 const DEMO_USER = {
@@ -117,9 +120,41 @@ function App() {
   const [pttActive, setPttActive] = useState(false);
   const [screenVolumes, setScreenVolumes] = useState({});
   const [unreadCounts, setUnreadCounts] = useState({});
+  const [musicState, setMusicState] = useState(null);
+  const [musicVolume, setMusicVolume] = useState(() => {
+    const saved = parseFloat(localStorage.getItem('ronncord_music_vol'));
+    return Number.isFinite(saved) ? saved : 0.35;
+  });
+  const musicAudioRef = useRef(null);
   const activeChannelIdRef = useRef(null);
   const activeDmIdRef = useRef(null);
   const viewModeRef = useRef('server');
+
+  useEffect(() => {
+    localStorage.setItem('ronncord_music_vol', String(musicVolume));
+    if (musicAudioRef.current) {
+      musicAudioRef.current.volume = deafened ? 0 : musicVolume;
+    }
+  }, [musicVolume, deafened]);
+
+  useEffect(() => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+    if (!voiceChannelId || !musicState?.current) {
+      audio.pause();
+      if (audio.src) audio.removeAttribute('src');
+      return;
+    }
+    if (audio.src !== musicState.current.url) {
+      audio.src = musicState.current.url;
+    }
+    audio.volume = deafened ? 0 : musicVolume;
+    if (musicState.isPlaying) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [musicState, voiceChannelId, deafened, musicVolume]);
 
   useEffect(() => {
     activeChannelIdRef.current = activeChannelId;
@@ -344,6 +379,11 @@ function App() {
         }
         setVoiceParticipants(prev => ({ ...prev, [channelId]: participants }));
       });
+      socket.on('music:state', state => {
+        if (voiceChannelIdRef.current === state?.channelId) {
+          setMusicState(state);
+        }
+      });
 
       voiceManagerRef.current = new VoiceManager(socket, {
         onPing: setVoicePing,
@@ -507,6 +547,22 @@ function App() {
       };
       setDemoMessagesMap(prev => ({ ...prev, [targetId]: [...(prev[targetId] || []), newMsg] }));
       setMessages(prev => [...prev, newMsg]);
+      return;
+    }
+
+    const trimmed = (payload.content || '').trim();
+    if (trimmed.startsWith('!play ') || trimmed === '!skip' || trimmed === '!stop') {
+      if (!voiceChannelId) {
+        alert('Entre em um canal de voz primeiro para usar os comandos do RonnBot Música.');
+        return;
+      }
+      if (trimmed.startsWith('!play ')) {
+        socketRef.current?.emit('music:play', { channelId: voiceChannelId, query: trimmed.slice(6).trim() });
+      } else if (trimmed === '!skip') {
+        socketRef.current?.emit('music:skip', { channelId: voiceChannelId });
+      } else if (trimmed === '!stop') {
+        socketRef.current?.emit('music:stop', { channelId: voiceChannelId });
+      }
       return;
     }
 
@@ -1073,6 +1129,13 @@ function App() {
                 {isScreenSharing ? <MonitorOff size={16} /> : <MonitorUp size={16} />}
               </button>
               <button
+                className={`icon-btn ${musicState?.isPlaying ? 'active' : ''}`}
+                title="RonnBot Música"
+                onClick={() => setModal('music')}
+              >
+                <Music size={16} />
+              </button>
+              <button
                 className="icon-btn"
                 title="Configurações de Voz e Supressão IA"
                 onClick={() => setModal('voice-settings')}
@@ -1090,6 +1153,7 @@ function App() {
                     await voiceManagerRef.current?.leave();
                   } catch {}
                   setVoiceChannelId(null);
+                  setMusicState(null);
                   setIsCameraOn(false);
                   setIsScreenSharing(false);
                   setLocalCameraStream(null);
@@ -1125,6 +1189,9 @@ function App() {
             </button>
             <button className={`icon-btn xs ${deafened ? 'danger' : ''}`} onClick={handleToggleDeafen} title="Desativar Áudio">
               {deafened ? <HeadphoneOff size={16} /> : <Headphones size={16} />}
+            </button>
+            <button className="icon-btn xs" onClick={() => setModal('notes')} title="Notas Privadas (Criptografadas)">
+              <Lock size={16} />
             </button>
             <button className="icon-btn xs" onClick={() => setModal('voice-settings')} title="Áudio & Supressão de Ruído IA">
               <Sliders size={16} />
@@ -1483,6 +1550,41 @@ function App() {
           }}
         />
       )}
+      {modal === 'notes' && (
+        <NotesModal onClose={() => setModal(null)} isDemo={isDemo} />
+      )}
+      {modal === 'music' && (
+        <MusicModal
+          onClose={() => setModal(null)}
+          musicState={musicState}
+          musicVolume={musicVolume}
+          onChangeVolume={setMusicVolume}
+          onPlayQuery={query => {
+            if (!voiceChannelId) return;
+            socketRef.current?.emit('music:play', { channelId: voiceChannelId, query });
+          }}
+          onToggle={() => {
+            if (!voiceChannelId) return;
+            socketRef.current?.emit('music:toggle', { channelId: voiceChannelId });
+          }}
+          onSkip={() => {
+            if (!voiceChannelId) return;
+            socketRef.current?.emit('music:skip', { channelId: voiceChannelId });
+          }}
+          onStop={() => {
+            if (!voiceChannelId) return;
+            socketRef.current?.emit('music:stop', { channelId: voiceChannelId });
+          }}
+        />
+      )}
+      <audio
+        ref={musicAudioRef}
+        crossOrigin="anonymous"
+        onEnded={() => {
+          if (voiceChannelId) socketRef.current?.emit('music:skip', { channelId: voiceChannelId });
+        }}
+        style={{ display: 'none' }}
+      />
     </div>
   );
 }
