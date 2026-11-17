@@ -375,7 +375,17 @@ app.patch('/api/auth/profile', authMiddleware, async (req, res) => {
 
 // Servers routes
 app.get('/api/servers', authMiddleware, async (req, res) => {
-  res.json({ servers: await getFullServersForUser(req.user.id) });
+  const servers = await getFullServersForUser(req.user.id);
+  const voiceParticipants = {};
+  for (const s of servers) {
+    for (const ch of s.channels) {
+      const room = voiceRooms.get(ch.id);
+      if (room && room.size > 0) {
+        voiceParticipants[ch.id] = Array.from(room.values());
+      }
+    }
+  }
+  res.json({ servers, voiceParticipants });
 });
 
 app.post('/api/servers', authMiddleware, async (req, res) => {
@@ -942,14 +952,20 @@ io.on('connection', async (socket) => {
   for (const s of myServers) socket.join(`server:${s.server_id}`);
 
   // Send active voice room participants immediately so user sees who is in calls before joining
-  for (const [chId, room] of voiceRooms.entries()) {
-    if (room.size > 0) {
-      const ch = await db.get('SELECT server_id FROM channels WHERE id = ?', chId);
-      if (ch && myServerIds.has(ch.server_id)) {
-        socket.emit('voice:participants', { channelId: chId, participants: Array.from(room.values()) });
+  async function emitActiveVoiceRooms() {
+    const freshServers = await db.all('SELECT server_id FROM server_members WHERE user_id = ?', userId);
+    const allowedServers = new Set(freshServers.map(s => s.server_id));
+    for (const [chId, room] of voiceRooms.entries()) {
+      if (room.size > 0) {
+        const ch = await db.get('SELECT server_id FROM channels WHERE id = ?', chId);
+        if (ch && allowedServers.has(ch.server_id)) {
+          socket.emit('voice:participants', { channelId: chId, participants: Array.from(room.values()) });
+        }
       }
     }
   }
+  await emitActiveVoiceRooms();
+  socket.on('voice:sync', emitActiveVoiceRooms);
 
   await db.run("UPDATE users SET status = 'online' WHERE id = ? AND status = 'offline'", userId);
   io.emit('presence:update', { userId, status: socket.user.status === 'offline' ? 'online' : socket.user.status });

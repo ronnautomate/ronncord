@@ -225,6 +225,9 @@ function App() {
         ]);
         if (!mounted) return;
         setServers(srvData.servers);
+        if (srvData.voiceParticipants) {
+          setVoiceParticipants(prev => ({ ...srvData.voiceParticipants, ...prev }));
+        }
         setFriends(frData.friends);
         setDmThreads(dmData.threads);
 
@@ -248,6 +251,9 @@ function App() {
     const socket = connectSocket(getToken());
     socketRef.current = socket;
     if (socket) {
+      socket.on('connect', () => {
+        socket.emit('voice:sync');
+      });
       socket.on('message:new', msg => {
         const targetKey = msg.channel_id || msg.dm_thread_id;
         const isCurrentlyOpen =
