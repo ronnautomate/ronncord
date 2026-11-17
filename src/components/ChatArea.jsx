@@ -13,6 +13,45 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function extractYouTubeIds(text) {
+  if (!text) return [];
+  const regex = /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?[^\s]*v=|shorts\/|live\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/g;
+  const ids = [];
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (!ids.includes(match[1])) ids.push(match[1]);
+  }
+  return ids.slice(0, 3);
+}
+
+function YouTubeEmbed({ videoId }) {
+  const [playing, setPlaying] = useState(false);
+  return (
+    <div className="yt-embed-card">
+      <div className="yt-embed-header">
+        <span className="yt-embed-badge">YouTube</span>
+        <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noreferrer">
+          Assistir no YouTube
+        </a>
+      </div>
+      {playing ? (
+        <iframe
+          className="yt-embed-iframe"
+          src={`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1`}
+          title="YouTube video player"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+        />
+      ) : (
+        <button type="button" className="yt-embed-thumb" onClick={() => setPlaying(true)} title="Reproduzir vídeo">
+          <img src={`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`} alt="YouTube preview" loading="lazy" />
+          <span className="yt-play-btn">▶</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 function renderFormattedText(text) {
   if (!text) return null;
   const parts = text.split(/(```[\s\S]*?```|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|https?:\/\/[^\s]+|@[a-zA-Z0-9_.-]+)/g);
@@ -353,10 +392,19 @@ export function ChatArea({
                     </form>
                   ) : (
                     msg.content && (
-                      <p className="message-text">
-                        {renderFormattedText(msg.content)}
-                        {msg.edited_at && <span className="edited-tag">(editado)</span>}
-                      </p>
+                      <>
+                        <p className="message-text">
+                          {renderFormattedText(msg.content)}
+                          {msg.edited_at && <span className="edited-tag">(editado)</span>}
+                        </p>
+                        {extractYouTubeIds(msg.content).length > 0 && (
+                          <div className="yt-embeds-list">
+                            {extractYouTubeIds(msg.content).map(vid => (
+                              <YouTubeEmbed key={vid} videoId={vid} />
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )
                   )}
 
