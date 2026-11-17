@@ -865,7 +865,18 @@ io.on('connection', async (socket) => {
   socket.join(`user:${userId}`);
 
   const myServers = await db.all('SELECT server_id FROM server_members WHERE user_id = ?', userId);
+  const myServerIds = new Set(myServers.map(s => s.server_id));
   for (const s of myServers) socket.join(`server:${s.server_id}`);
+
+  // Send active voice room participants immediately so user sees who is in calls before joining
+  for (const [chId, room] of voiceRooms.entries()) {
+    if (room.size > 0) {
+      const ch = await db.get('SELECT server_id FROM channels WHERE id = ?', chId);
+      if (ch && myServerIds.has(ch.server_id)) {
+        socket.emit('voice:participants', { channelId: chId, participants: Array.from(room.values()) });
+      }
+    }
+  }
 
   await db.run("UPDATE users SET status = 'online' WHERE id = ? AND status = 'offline'", userId);
   io.emit('presence:update', { userId, status: socket.user.status === 'offline' ? 'online' : socket.user.status });

@@ -1289,6 +1289,7 @@ function App() {
           title={activeChannel.name}
           topic={activeChannel.topic}
           messages={messages}
+          members={activeServer?.members || []}
           currentUser={user}
           typingUsers={typingUsers}
           showMembers={showMembers}

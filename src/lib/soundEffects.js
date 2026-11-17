@@ -72,28 +72,28 @@ export const SoundFX = {
     playChime([
       { freq: 392.0, dur: 0.09, gap: 0.015 },
       { freq: 587.33, dur: 0.14, gap: 0 }
-    ], { type: 'sine', volume: 0.18, filterFreq: 2400 });
+    ], { type: 'sine', volume: 0.24, filterFreq: 2600 });
   },
   // Saiu da call (D5 -> G4)
   leaveVoice() {
     playChime([
       { freq: 587.33, dur: 0.085, gap: 0.015 },
       { freq: 392.0, dur: 0.15, gap: 0 }
-    ], { type: 'sine', volume: 0.18, filterFreq: 2200 });
+    ], { type: 'sine', volume: 0.24, filterFreq: 2400 });
   },
   // Outro usuário entrou na call (B4 -> E5)
   userJoined() {
     playChime([
-      { freq: 493.88, dur: 0.065, gap: 0.012 },
-      { freq: 659.25, dur: 0.10, gap: 0 }
-    ], { type: 'sine', volume: 0.13, filterFreq: 2600 });
+      { freq: 493.88, dur: 0.075, gap: 0.015 },
+      { freq: 659.25, dur: 0.12, gap: 0 }
+    ], { type: 'sine', volume: 0.28, filterFreq: 2800 });
   },
   // Outro usuário saiu da call (E5 -> B4)
   userLeft() {
     playChime([
-      { freq: 659.25, dur: 0.065, gap: 0.012 },
-      { freq: 493.88, dur: 0.10, gap: 0 }
-    ], { type: 'sine', volume: 0.13, filterFreq: 2200 });
+      { freq: 659.25, dur: 0.075, gap: 0.015 },
+      { freq: 493.88, dur: 0.12, gap: 0 }
+    ], { type: 'sine', volume: 0.28, filterFreq: 2400 });
   },
   // Mutar microfone
   mute() {

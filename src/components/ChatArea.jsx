@@ -44,6 +44,7 @@ export function ChatArea({
   topic,
   isDM = false,
   messages,
+  members = [],
   currentUser,
   typingUsers = [],
   showMembers,
@@ -70,6 +71,7 @@ export function ChatArea({
   const [reactingMsgId, setReactingMsgId] = useState(null);
   const [recording, setRecording] = useState(false);
   const [recordSec, setRecordSec] = useState(0);
+  const [mentionQuery, setMentionQuery] = useState(null);
 
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -84,11 +86,22 @@ export function ChatArea({
 
   function handleTextChange(val) {
     setText(val);
+    const match = val.match(/(?:^|\s)@([a-zA-Z0-9_.-]*)$/);
+    if (match && members.length > 0) {
+      setMentionQuery(match[1].toLowerCase());
+    } else {
+      setMentionQuery(null);
+    }
     if (onTyping) {
       onTyping(true);
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => onTyping(false), 1800);
     }
+  }
+
+  function insertMention(username) {
+    setText(prev => prev.replace(/(?:^|\s)@[a-zA-Z0-9_.-]*$/, m => (m.startsWith(' ') ? ` @${username} ` : `@${username} `)));
+    setMentionQuery(null);
   }
 
   async function handleFileSelect(e) {
@@ -188,6 +201,12 @@ export function ChatArea({
   }
 
   const pinnedMessages = messages.filter(m => m.pinned);
+  const pendingMentionMatches = mentionQuery !== null
+    ? members.filter(m =>
+        m.username?.toLowerCase().includes(mentionQuery) ||
+        m.display_name?.toLowerCase().includes(mentionQuery)
+      ).slice(0, 6)
+    : [];
 
   const visibleMessages = searchQuery.trim()
     ? messages.filter(m =>
@@ -473,6 +492,25 @@ export function ChatArea({
                   <X size={12} />
                 </button>
               </div>
+            ))}
+          </div>
+        )}
+
+        {pendingMentionMatches.length > 0 && (
+          <div className="mention-autocomplete">
+            {pendingMentionMatches.map(m => (
+              <button
+                key={m.id}
+                type="button"
+                className="mention-option"
+                onClick={() => insertMention(m.username)}
+              >
+                <span className="avatar xs" style={{ background: m.avatar_color }}>
+                  {(m.display_name || m.username)[0].toUpperCase()}
+                </span>
+                <strong>{m.display_name}</strong>
+                <small>@{m.username}</small>
+              </button>
             ))}
           </div>
         )}

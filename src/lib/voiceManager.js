@@ -214,8 +214,14 @@ export class VoiceManager {
     if (this.channelId) {
       this.socket?.emit('voice:leave', this.channelId);
     }
-    this.stopCamera();
-    this.stopScreenShare();
+    if (this.cameraStream) {
+      this.cameraStream.getTracks().forEach(t => t.stop());
+      this.cameraStream = null;
+    }
+    if (this.screenStream) {
+      this.screenStream.getTracks().forEach(t => t.stop());
+      this.screenStream = null;
+    }
     for (const socketId of Array.from(this.peers.keys())) {
       this._closePeer(socketId);
     }
