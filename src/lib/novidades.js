@@ -8,22 +8,18 @@ export const NOVIDADES = {
   items: [
     {
       title: 'Temas 🎨',
-      img: 'temas.webp',
       text: 'Perfil > aba **Tema**. Escolha entre RONNCORD, Grafite, Meia-noite, Uva e Claro. Muda na hora e só pra você.'
     },
     {
       title: 'GIFs de verdade',
-      img: 'gifs.webp',
       text: 'O botão **GIF** agora busca qualquer GIF (pelo KLIPY). Digite o que quiser ou use os atalhos. Rolando pra baixo carrega mais.'
     },
     {
       title: 'Visor de imagem',
-      img: 'visor.webp',
       text: 'Clique numa foto do chat e ela abre grande. As setas (ou ← →) passam pelas outras fotos do canal, clicar na foto mostra no tamanho real e **Esc** fecha.'
     },
     {
       title: 'RONNCORD no celular 📱',
-      img: 'celular.webp',
       text: 'No celular a tela vira uma coluna só: **☰** abre servidores e canais, o ícone de pessoas abre os membros. Toque numa mensagem pra reagir, responder ou apagar.'
     },
     {
