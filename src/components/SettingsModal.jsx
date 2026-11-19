@@ -1,0 +1,431 @@
+import React, { useRef, useState } from 'react';
+import { X, Upload, Sparkles } from 'lucide-react';
+import { resolveAssetUrl } from '../lib/api.js';
+import { THEMES, getSavedTheme, applyTheme, nameColor as safeNameColor } from '../lib/themes.js';
+
+// Configurações do usuário (perfil, visual, clã, tema). Fica num arquivo próprio pra ser repaginada
+// sem mexer no Modals.jsx. O Modals.jsx só reexporta como ProfileModal.
+
+const COLORS = ['#f2f3f5', '#f0b232', '#5865F2', '#57F287', '#EB459E', '#ED4245', '#00e5ff', '#9B59B6'];
+
+const BANNERS = [
+  '#5865F2',
+  '#EB459E',
+  '#23A559',
+  '#E67E22',
+  '#111827',
+  'linear-gradient(135deg, #5865F2 0%, #EB459E 100%)',
+  'linear-gradient(135deg, #23A559 0%, #0EA5E9 100%)',
+  'linear-gradient(135deg, #F59E0B 0%, #EF4444 100%)'
+];
+
+const DECORATIONS = [
+  { id: 'none', label: 'Sem moldura' },
+  { id: 'nitro-glow', label: 'Brilho Roxo' },
+  { id: 'cyber-ring', label: 'Neon Ciano' },
+  { id: 'fire-aura', label: 'Aura de Fogo' },
+  { id: 'gold-crown', label: 'Ouro Real' },
+  { id: 'emerald-pulse', label: 'Esmeralda' }
+];
+
+const NAMEPLATES = [
+  { id: 'none', label: 'Padrão' },
+  { id: 'aurora-purple', label: 'Aurora Roxa' },
+  { id: 'crimson-ember', label: 'Brasa Carmesim' },
+  { id: 'cyber-cyan', label: 'Cyber Ciano' },
+  { id: 'emerald-matrix', label: 'Esmeralda' },
+  { id: 'golden-sunset', label: 'Ouro Solar' }
+];
+
+const PROFILE_EFFECTS = [
+  { id: 'none', label: 'Sem efeito' },
+  { id: 'cyber-glitch', label: '⚡ Cyber Glitch' },
+  { id: 'sakura-glow', label: '🌸 Aurora Mística' },
+  { id: 'crimson-thunder', label: '🔥 Fúria Carmesim' },
+  { id: 'galaxy-portal', label: '🌌 Portal Galáctico' },
+  { id: 'matrix-rain', label: '💚 Matrix Neon' }
+];
+
+const CLAN_ICONS = ['💀', '🩵', '🔥', '⚡', '👑', '🎮', '💎', '🚀'];
+
+export const PROFILE_BADGES = [
+  { id: 'nitro', icon: '🚀', label: 'Nitro' },
+  { id: 'gamer', icon: '🎮', label: 'Gamer' },
+  { id: 'boost', icon: '💎', label: 'Booster' },
+  { id: 'dev', icon: '⚡', label: 'Dev' },
+  { id: 'vip', icon: '👑', label: 'VIP' },
+  { id: 'verified', icon: '🛡️', label: 'Verificado' }
+];
+
+function parseBadges(raw) {
+  if (Array.isArray(raw)) return raw;
+  try { return JSON.parse(raw || '[]'); } catch { return []; }
+}
+
+export function SettingsModal({ user, onClose, onSave, onUploadAvatar, onLogout }) {
+  const [activeTab, setActiveTab] = useState('basic'); // 'basic' | 'visual' | 'clan' | 'theme'
+  const [theme, setTheme] = useState(getSavedTheme);
+  const [displayName, setDisplayName] = useState(user.display_name || '');
+  const [pronouns, setPronouns] = useState(user.pronouns || '');
+  const [customStatus, setCustomStatus] = useState(user.custom_status || '');
+  const [bio, setBio] = useState(user.bio || '');
+  const [status, setStatus] = useState(user.status || 'online');
+  const [avatarColor, setAvatarColor] = useState(user.avatar_color || '#5865F2');
+  const [avatarUrl, setAvatarUrl] = useState(user.avatar_url || '');
+  const [bannerColor, setBannerColor] = useState(user.banner_color || '#5865F2');
+  const [bannerUrl, setBannerUrl] = useState(user.banner_url || '');
+  const [avatarDecoration, setAvatarDecoration] = useState(user.avatar_decoration || 'none');
+  const [nameColor, setNameColor] = useState(user.name_color || '#f2f3f5');
+  const [nameplateStyle, setNameplateStyle] = useState(user.nameplate_style || 'none');
+  const [clanTag, setClanTag] = useState(user.clan_tag || '');
+  const [clanIcon, setClanIcon] = useState(user.clan_icon || '💀');
+  const [badges, setBadges] = useState(() => parseBadges(user.badges_json));
+  const [profileEffect, setProfileEffect] = useState(user.profile_effect || 'none');
+  const [effectReplayKey, setEffectReplayKey] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const avatarFileRef = useRef(null);
+  const bannerFileRef = useRef(null);
+
+  async function handleUpload(e, target) {
+    const file = e.target.files?.[0];
+    if (!file || !onUploadAvatar) return;
+    setUploading(true);
+    try {
+      const uploaded = await onUploadAvatar(file);
+      if (target === 'avatar') setAvatarUrl(uploaded.url);
+      else setBannerUrl(uploaded.url);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  }
+
+  function toggleBadge(id) {
+    setBadges(prev => (prev.includes(id) ? prev.filter(b => b !== id) : [...prev, id]));
+  }
+
+  async function handleSave(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onSave({
+        display_name: displayName,
+        pronouns,
+        custom_status: customStatus,
+        bio,
+        status,
+        avatar_color: avatarColor,
+        avatar_url: avatarUrl || null,
+        banner_color: bannerColor,
+        banner_url: bannerUrl || null,
+        avatar_decoration: avatarDecoration,
+        name_color: nameColor,
+        nameplate_style: nameplateStyle,
+        clan_tag: clanTag.trim().slice(0, 6).toUpperCase(),
+        clan_icon: clanIcon,
+        badges_json: JSON.stringify(badges),
+        profile_effect: profileEffect
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      {profileEffect !== 'none' && (
+        <div key={`bg-${effectReplayKey}`} className={`fullscreen-fx-overlay effect-${profileEffect}`} aria-hidden="true">
+          <div className="profile-fx-overlay" />
+        </div>
+      )}
+      <div className="modal-card wide" style={{ maxHeight: '90vh', overflowY: 'auto', position: 'relative', zIndex: 2 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Personalizar Perfil</h2>
+          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <form onSubmit={handleSave} className="auth-form">
+          {/* Live Discord Nitro Profile Card Preview */}
+          <div
+            key={effectReplayKey}
+            className={`profile-card-preview nameplate-${nameplateStyle} effect-${profileEffect}`}
+          >
+            {profileEffect !== 'none' && <div className="profile-fx-overlay" aria-hidden="true" />}
+            <div
+              className="profile-banner"
+              style={bannerUrl ? { backgroundImage: `url(${resolveAssetUrl(bannerUrl)})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: bannerColor }}
+            />
+            <div className="profile-card-body">
+              <div className="profile-avatar-row">
+                <div className={`avatar xl deco-${avatarDecoration}`} style={{ background: avatarColor }}>
+                  {avatarUrl ? (
+                    <img src={resolveAssetUrl(avatarUrl)} alt={displayName} className="avatar-img" />
+                  ) : (
+                    (displayName || user.username || 'R')[0].toUpperCase()
+                  )}
+                  <span className={`status-dot ${status}`} />
+                </div>
+                {customStatus && (
+                  <div className="thought-bubble">{customStatus}</div>
+                )}
+              </div>
+
+              <div className="profile-preview-names">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <strong style={{ color: safeNameColor(nameColor) || 'var(--text)' }}>{displayName || user.username}</strong>
+                  {clanTag && (
+                    <span className="clan-tag-pill">{clanIcon} {clanTag}</span>
+                  )}
+                </div>
+                <span>@{user.username} {pronouns ? `• ${pronouns}` : ''}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="auth-tabs" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr', marginBottom: 4 }}>
+            <button type="button" className={activeTab === 'basic' ? 'active' : ''} onClick={() => setActiveTab('basic')}>
+              Perfil
+            </button>
+            <button type="button" className={activeTab === 'visual' ? 'active' : ''} onClick={() => setActiveTab('visual')}>
+              Efeitos & Visual
+            </button>
+            <button type="button" className={activeTab === 'clan' ? 'active' : ''} onClick={() => setActiveTab('clan')}>
+              Clã & Insígnias
+            </button>
+            <button type="button" className={activeTab === 'theme' ? 'active' : ''} onClick={() => setActiveTab('theme')}>
+              Tema
+            </button>
+          </div>
+
+          {activeTab === 'theme' && (
+            <div className="theme-section">
+              <p className="theme-hint">Muda só pra você, na hora. Não precisa salvar.</p>
+              <div className="theme-grid">
+                {THEMES.map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`theme-option ${theme === t.id ? 'active' : ''}`}
+                    onClick={() => setTheme(applyTheme(t.id))}
+                  >
+                    <span className="theme-sample" style={{ background: t.chat }}>
+                      <i style={{ background: t.side }} />
+                      <b style={{ background: t.dot }} />
+                    </span>
+                    <span>{t.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'basic' && (
+            <>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <input ref={avatarFileRef} type="file" accept="image/*" hidden onChange={e => handleUpload(e, 'avatar')} />
+                <input ref={bannerFileRef} type="file" accept="image/*" hidden onChange={e => handleUpload(e, 'banner')} />
+                <button type="button" className="btn-primary xs" disabled={uploading} onClick={() => avatarFileRef.current?.click()}>
+                  <Upload size={13} /> Avatar (Foto/GIF)
+                </button>
+                <button type="button" className="btn-primary xs" disabled={uploading} onClick={() => bannerFileRef.current?.click()}>
+                  <Upload size={13} /> Banner (Foto/GIF)
+                </button>
+                {avatarUrl && <button type="button" className="btn-ghost xs" onClick={() => setAvatarUrl('')}>Tirar Avatar</button>}
+                {bannerUrl && <button type="button" className="btn-ghost xs" onClick={() => setBannerUrl('')}>Tirar Banner</button>}
+              </div>
+
+              <div className="profile-grid-2">
+                <label>
+                  <span>NOME DE EXIBIÇÃO</span>
+                  <input value={displayName} onChange={e => setDisplayName(e.target.value)} required />
+                </label>
+                <label>
+                  <span>PRONOMES / SUBTÍTULO</span>
+                  <input value={pronouns} onChange={e => setPronouns(e.target.value)} placeholder="ex: ele/dele" />
+                </label>
+              </div>
+
+              <div className="profile-grid-2">
+                <label>
+                  <span>STATUS</span>
+                  <select value={status} onChange={e => setStatus(e.target.value)}>
+                    <option value="online">🟢 Online</option>
+                    <option value="idle">🟡 Ausente</option>
+                    <option value="dnd">🔴 Não Perturbe</option>
+                    <option value="offline">⚫ Invisível</option>
+                  </select>
+                </label>
+                <label>
+                  <span>BALÃO DE STATUS</span>
+                  <input
+                    value={customStatus}
+                    onChange={e => setCustomStatus(e.target.value)}
+                    placeholder="ex: www.ronncord.com"
+                  />
+                </label>
+              </div>
+
+              <label>
+                <span>SOBRE MIM (BIO)</span>
+                <textarea
+                  rows={2}
+                  value={bio}
+                  onChange={e => setBio(e.target.value)}
+                  placeholder="Links, bio, descrição..."
+                />
+              </label>
+            </>
+          )}
+
+          {activeTab === 'visual' && (
+            <>
+              <label>
+                <span>✨ EFEITO DE ENTRADA NA TELA TODA</span>
+                <div className="deco-picker">
+                  {PROFILE_EFFECTS.map(fx => (
+                    <button
+                      key={fx.id}
+                      type="button"
+                      className={`deco-chip ${profileEffect === fx.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setProfileEffect(fx.id);
+                        setEffectReplayKey(k => k + 1);
+                      }}
+                    >
+                      {fx.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+
+              <label>
+                <span>PLACA DE FUNDO (NAMEPLATE)</span>
+                <div className="deco-picker">
+                  {NAMEPLATES.map(np => (
+                    <button
+                      key={np.id}
+                      type="button"
+                      className={`deco-chip ${nameplateStyle === np.id ? 'active' : ''}`}
+                      onClick={() => setNameplateStyle(np.id)}
+                    >
+                      {np.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+
+              <label>
+                <span><Sparkles size={12} style={{ display: 'inline', marginRight: 4 }} />MOLDURA DO AVATAR</span>
+                <div className="deco-picker">
+                  {DECORATIONS.map(d => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      className={`deco-chip ${avatarDecoration === d.id ? 'active' : ''}`}
+                      onClick={() => setAvatarDecoration(d.id)}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+
+              <div className="profile-grid-2">
+                <label>
+                  <span>COR DO NOME</span>
+                  <div className="color-picker">
+                    {COLORS.map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        className={`color-swatch ${nameColor === c ? 'active' : ''}`}
+                        style={{ background: c }}
+                        onClick={() => setNameColor(c)}
+                      />
+                    ))}
+                  </div>
+                </label>
+                <label>
+                  <span>BANNER GRADIENTE</span>
+                  <div className="color-picker">
+                    {BANNERS.map(b => (
+                      <button
+                        key={b}
+                        type="button"
+                        className={`color-swatch ${bannerColor === b ? 'active' : ''}`}
+                        style={{ background: b }}
+                        onClick={() => setBannerColor(b)}
+                      />
+                    ))}
+                  </div>
+                </label>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'clan' && (
+            <>
+              <div className="profile-grid-2">
+                <label>
+                  <span>TAG DO CLÃ (ATÉ 6 LETRAS)</span>
+                  <input
+                    maxLength={6}
+                    value={clanTag}
+                    onChange={e => setClanTag(e.target.value.toUpperCase())}
+                    placeholder="ex: 0DAY, QSR, LOGI"
+                  />
+                </label>
+                <label>
+                  <span>ÍCONE DA TAG</span>
+                  <div className="deco-picker">
+                    {CLAN_ICONS.map(ic => (
+                      <button
+                        key={ic}
+                        type="button"
+                        className={`deco-chip ${clanIcon === ic ? 'active' : ''}`}
+                        onClick={() => setClanIcon(ic)}
+                      >
+                        {ic}
+                      </button>
+                    ))}
+                  </div>
+                </label>
+              </div>
+
+              <label>
+                <span>INSÍGNIAS DO PERFIL</span>
+                <div className="deco-picker">
+                  {PROFILE_BADGES.map(b => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      className={`deco-chip ${badges.includes(b.id) ? 'active' : ''}`}
+                      onClick={() => toggleBadge(b.id)}
+                    >
+                      {b.icon} {b.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+            </>
+          )}
+
+          <div className="modal-actions between">
+            <button type="button" className="btn-danger" onClick={onLogout}>Sair da Conta</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button>
+              <button type="submit" className="btn-primary" disabled={saving}>
+                {saving ? 'Salvando...' : 'Salvar Perfil'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+

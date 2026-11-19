@@ -186,8 +186,31 @@ const Chimes = {
   }
 };
 
+// três bipes do discordia: alguém abriu uma tela na call (mesmas notas e tempos de lá)
+function screenShareBeeps() {
+  if (!isSoundsEnabled()) return;
+  const ctx = getCtx();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  [880, 1175, 1568].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const t = now + i * 0.09;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.18, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.17);
+  });
+}
+
 export const SoundFX = {
   ...Chimes,
+  // alguém (eu ou outra pessoa da call) começou a transmitir a tela
+  screenShare: screenShareBeeps,
   joinVoice: () => playFile('entrar', Chimes.joinVoice),
   leaveVoice: () => playFile('sair', Chimes.leaveVoice),
   userJoined: () => playFile('entrar', Chimes.userJoined),
