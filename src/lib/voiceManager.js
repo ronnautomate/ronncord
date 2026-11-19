@@ -255,6 +255,7 @@ export class VoiceManager {
     }
     this.pipeline?.destroy();
     this.pipeline = null;
+    this.prevMedia = new Map();
     this.channelId = null;
     this.lastSpeaking = false;
     this.callbacks.onPing?.(null);
@@ -396,8 +397,11 @@ export class VoiceManager {
     const trackIds = new Set(stream.getTracks().map(t => t.id));
     for (const [sid, peer] of this.peers.entries()) {
       let removed = false;
-      for (const sender of peer.pc.getSenders()) {
-        if (sender.track && trackIds.has(sender.track.id)) {
+      const mids = [];
+      for (const t of peer.pc.getTransceivers()) {
+        const sender = t.sender;
+        if (sender?.track && trackIds.has(sender.track.id)) {
+          if (t.mid) mids.push(t.mid);
           try {
             peer.pc.removeTrack(sender);
             removed = true;
@@ -405,11 +409,12 @@ export class VoiceManager {
         }
       }
       if (removed) {
+        // o id da trilha do lado de quem assiste nem sempre é o mesmo daqui: manda o mid junto
         for (const tid of trackIds) {
           this.socket?.emit('webrtc:signal', {
             targetSocketId: sid,
             channelId: this.channelId,
-            signal: { type: 'track-removed', trackId: tid }
+            signal: { type: 'track-removed', trackId: tid, mids }
           });
         }
         await this._renegotiatePeer(sid, peer.pc);
@@ -535,7 +540,11 @@ export class VoiceManager {
         height: { ideal: 1080 },
         frameRate: { ideal: 60 }
       }).catch(() => {});
-      videoTrack.onended = () => this.stopScreenShare();
+      videoTrack.onended = async () => {
+        if (this.screenStream !== stream) return;
+        await this.stopScreenShare();
+        this.callbacks.onScreenEnded?.();
+      };
     }
 
     await this._attachVideoStreamToPeers(stream, 'screen');
@@ -622,7 +631,11 @@ export class VoiceManager {
       return;
     }
     if (signal.type === 'track-removed') {
-      this.remoteVideos.delete(`${fromSocketId}:${signal.trackId}`);
+      const mids = Array.isArray(signal.mids) ? signal.mids : [];
+      for (const [key, v] of this.remoteVideos.entries()) {
+        if (v.socketId !== fromSocketId) continue;
+        if (key === `${fromSocketId}:${signal.trackId}` || (v.mid && mids.includes(v.mid))) this.remoteVideos.delete(key);
+      }
       this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
       return;
     }
@@ -686,6 +699,22 @@ export class VoiceManager {
 
   _handleParticipants({ channelId, participants }) {
     if (channelId !== this.channelId) return;
+    // quem estava transmitindo e parou: tira o vídeo dela mesmo se o aviso da trilha se perdeu
+    // (só na virada de ligado -> desligado, pra não apagar uma tela que acabou de chegar)
+    if (!this.prevMedia) this.prevMedia = new Map();
+    let pruned = false;
+    for (const p of participants) {
+      const before = this.prevMedia.get(p.socketId);
+      if (before) {
+        for (const [key, v] of this.remoteVideos.entries()) {
+          if (v.socketId !== p.socketId) continue;
+          const stopped = v.kind === 'camera' ? (before.cameraOn && !p.cameraOn) : (before.screenSharing && !p.screenSharing);
+          if (stopped) { this.remoteVideos.delete(key); pruned = true; }
+        }
+      }
+      this.prevMedia.set(p.socketId, { cameraOn: Boolean(p.cameraOn), screenSharing: Boolean(p.screenSharing) });
+    }
+    if (pruned) this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
     const activeIds = new Set(participants.map(p => p.socketId));
     for (const sid of Array.from(this.peers.keys())) {
       if (!activeIds.has(sid)) {
@@ -864,10 +893,14 @@ export class VoiceManager {
           stream: remoteStream
         });
         this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
-        event.track.onended = () => {
+        const dropVideo = () => {
+          if (this.remoteVideos.get(key)?.stream !== remoteStream) return;
           this.remoteVideos.delete(key);
           this.callbacks.onRemoteVideos?.(Array.from(this.remoteVideos.values()));
         };
+        event.track.onended = dropVideo;
+        // quem transmitia tirou a trilha: o navegador avisa no stream (a trilha não "termina")
+        remoteStream.addEventListener('removetrack', e => { if (e.track === event.track) dropVideo(); });
       }
     };
 
