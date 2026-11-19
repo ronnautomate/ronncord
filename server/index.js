@@ -595,6 +595,20 @@ app.patch('/api/servers/:serverId', authMiddleware, async (req, res) => {
   res.json({ server: updated });
 });
 
+// Cargo de um membro (só o dono do servidor muda): 'admin' ou 'member'
+app.patch('/api/servers/:serverId/members/:userId', authMiddleware, async (req, res) => {
+  const { serverId, userId } = req.params;
+  const me = await db.get('SELECT role FROM server_members WHERE server_id = ? AND user_id = ?', serverId, req.user.id);
+  if (!me || me.role !== 'owner') return res.status(403).json({ error: 'Só o dono do servidor muda cargos' });
+  const target = await db.get('SELECT role FROM server_members WHERE server_id = ? AND user_id = ?', serverId, userId);
+  if (!target) return res.status(404).json({ error: 'Essa pessoa não está no servidor' });
+  if (target.role === 'owner') return res.status(400).json({ error: 'Não dá pra mudar o cargo do dono' });
+  const role = req.body?.role === 'admin' ? 'admin' : 'member';
+  await db.run('UPDATE server_members SET role = ? WHERE server_id = ? AND user_id = ?', role, serverId, userId);
+  io.to(`server:${serverId}`).emit('server:member_role', { serverId, userId, role });
+  res.json({ ok: true, role });
+});
+
 app.post('/api/servers/join/:inviteCode', authMiddleware, async (req, res) => {
   const code = String(req.params.inviteCode || '').trim();
   const srv = await db.get('SELECT * FROM servers WHERE invite_code = ?', code);
@@ -1188,6 +1202,20 @@ io.on('connection', async (socket) => {
 });
 
 await initDatabase();
+
+// Passos que rodam UMA vez no banco (ficam marcados em app_flags pra não repetir)
+async function runOnce(flag, fn) {
+  await db.exec('CREATE TABLE IF NOT EXISTS app_flags (key TEXT PRIMARY KEY, done_at INTEGER NOT NULL)');
+  if (await db.get('SELECT 1 FROM app_flags WHERE key = ?', flag)) return;
+  await fn();
+  await db.run('INSERT INTO app_flags (key, done_at) VALUES (?, ?)', flag, Date.now());
+}
+// combinado com o dono (19/11/2026): @zaza vira admin nos servidores em que já está.
+// Roda uma vez só; depois o dono muda pelo botão "Tornar/Tirar admin" no perfil.
+await runOnce('admin-zaza-2026-11-19', () => db.run(
+  "UPDATE server_members SET role = 'admin' WHERE role = 'member' AND user_id IN (SELECT id FROM users WHERE username = 'zaza')"
+));
+
 server.listen(PORT, () => {
   console.log(`[RONNCORD API] Running on http://localhost:${PORT} (Unlimited API)`);
 });
