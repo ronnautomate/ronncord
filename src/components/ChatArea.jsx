@@ -6,6 +6,7 @@ import {
 import { resolveAssetUrl } from '../lib/api.js';
 import { GifPicker } from './GifPicker.jsx';
 import { ImageViewer } from './ImageViewer.jsx';
+import { isAvisoMessage, avisoText, SLASH_COMMANDS } from '../lib/aviso.js';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '🚀', '👀', '🎉', '💯'];
 
@@ -122,6 +123,7 @@ export function ChatArea({
 
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
+  const textInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordChunksRef = useRef([]);
@@ -248,6 +250,11 @@ export function ChatArea({
   }
 
   const pinnedMessages = messages.filter(m => m.pinned);
+  // digitou "/" no começo: mostra os comandos (por enquanto o /aviso)
+  const slashMatches = /^\/\S*$/.test(text)
+    ? SLASH_COMMANDS.filter(c => c.cmd.startsWith(text.toLowerCase()))
+    : [];
+
   const pendingMentionMatches = mentionQuery !== null
     ? members.filter(m =>
         m.username?.toLowerCase().includes(mentionQuery) ||
@@ -366,8 +373,11 @@ export function ChatArea({
 
         {visibleMessages.map((msg, i) => {
           const prev = visibleMessages[i - 1];
+          const isAviso = isAvisoMessage(msg.content);
           const grouped =
             prev &&
+            !isAviso &&
+            !isAvisoMessage(prev.content) &&
             prev.author_id === msg.author_id &&
             !msg.reply_to &&
             msg.created_at - prev.created_at < 5 * 60 * 1000;
@@ -377,7 +387,7 @@ export function ChatArea({
 
           return (
             <div
-              className={`message ${grouped ? 'grouped' : ''} ${tappedId === msg.id ? 'tapped' : ''}`}
+              className={`message ${grouped ? 'grouped' : ''} ${isAviso ? 'message-aviso' : ''} ${tappedId === msg.id ? 'tapped' : ''}`}
               key={msg.id}
               onClick={e => {
                 // no celular não tem hover: tocar na mensagem mostra reagir/responder/apagar
@@ -415,6 +425,7 @@ export function ChatArea({
                   {!grouped && (
                     <div className="message-meta">
                       <strong className="clickable" onClick={() => onSelectUser?.(msg.author)}>{authorName}</strong>
+                      {isAviso && <span className="aviso-tag">📢 AVISO</span>}
                       <small>{formatTime(msg.created_at)}</small>
                     </div>
                   )}
@@ -433,7 +444,7 @@ export function ChatArea({
                     msg.content && (
                       <>
                         <p className="message-text">
-                          {renderFormattedText(msg.content)}
+                          {renderFormattedText(isAviso ? avisoText(msg.content) : msg.content)}
                           {msg.edited_at && <span className="edited-tag">(editado)</span>}
                         </p>
                         {extractYouTubeIds(msg.content).length > 0 && (
@@ -589,6 +600,23 @@ export function ChatArea({
           </div>
         )}
 
+        {slashMatches.length > 0 && (
+          <div className="mention-autocomplete">
+            {slashMatches.map(c => (
+              <button
+                key={c.cmd}
+                type="button"
+                className="mention-option"
+                onClick={() => { setText(`${c.cmd} `); textInputRef.current?.focus(); }}
+              >
+                <strong>{c.cmd}</strong>
+                <small style={{ marginLeft: 0 }}>{c.args}</small>
+                <small style={{ marginLeft: 'auto' }}>{c.desc}</small>
+              </button>
+            ))}
+          </div>
+        )}
+
         {pendingMentionMatches.length > 0 && (
           <div className="mention-autocomplete">
             {pendingMentionMatches.map(m => (
@@ -636,6 +664,7 @@ export function ChatArea({
             </div>
           ) : (
             <input
+              ref={textInputRef}
               value={text}
               onChange={e => handleTextChange(e.target.value)}
               placeholder={uploading ? 'Enviando arquivo...' : `Conversar em ${isDM ? '@' : '#'}${title}`}
