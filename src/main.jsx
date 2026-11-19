@@ -24,7 +24,13 @@ import {
 import { VoiceSettingsModal } from './components/VoiceSettingsModal.jsx';
 import { NotesModal } from './components/NotesModal.jsx';
 import { MusicModal } from './components/MusicModal.jsx';
+import { WhatsNewModal } from './components/WhatsNewModal.jsx';
+import { NOVIDADES, isNew, markSeen } from './lib/novidades.js';
 import './style.css';
+import './discordia-extras.css';
+import { applyTheme, getSavedTheme, nameColor } from './lib/themes.js';
+
+applyTheme(getSavedTheme());
 
 const DEMO_USER = {
   id: 'demo-user',
@@ -171,6 +177,9 @@ function App() {
     }
   }, [activeChannelId, activeDmId, viewMode]);
 
+  const [drawer, setDrawer] = useState(null); // celular: null | 'nav' (servidores+canais) | 'members'
+  const [whatsNew, setWhatsNew] = useState(null); // null | 'new' (sozinho) | 'all' (botão ✨)
+  const [hasNews, setHasNews] = useState(() => NOVIDADES.items.some(it => isNew(it)));
   const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile' | 'voice-settings' | 'new-dm'
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [volumeTarget, setVolumeTarget] = useState(null);
@@ -796,6 +805,22 @@ function App() {
     else SoundFX.undeafen();
   }
 
+  // O que há de novo: abre sozinho uma vez quando sai versão nova (depois do login)
+  useEffect(() => {
+    if (user && hasNews && whatsNew === null && !sessionStorage.getItem('ronncord_news_shown')) {
+      sessionStorage.setItem('ronncord_news_shown', '1');
+      setWhatsNew('new');
+    }
+  }, [user]);
+
+  function closeWhatsNew() {
+    markSeen();
+    setHasNews(false);
+    setWhatsNew(null);
+  }
+
+  const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
+
   if (booting) {
     return <div className="boot-screen">Carregando RONNCORD...</div>;
   }
@@ -813,7 +838,8 @@ function App() {
   const offlineMembers = activeServer?.members?.filter(m => m.status === 'offline') || [];
 
   return (
-    <div className="app">
+    <div className={`app ${drawer ? `drawer-${drawer}` : ''}`}>
+      {drawer && <div className="drawer-backdrop" onClick={() => setDrawer(null)} />}
       {/* Server Rail */}
       <aside className="server-rail">
         <button
@@ -850,6 +876,14 @@ function App() {
         >
           <Plus size={22} />
         </button>
+
+        <button
+          className={`server-logo whats-new-btn ${hasNews ? 'has-new' : ''}`}
+          title="O que há de novo"
+          onClick={() => { setDrawer(null); setWhatsNew('all'); }}
+        >
+          <Sparkles size={20} />
+        </button>
       </aside>
 
       {/* Channels / DMs Sidebar */}
@@ -884,6 +918,7 @@ function App() {
                     className={`channel ${activeChannelId === ch.id ? 'selected' : ''}`}
                     onClick={() => {
                       setActiveChannelId(ch.id);
+                      setDrawer(null);
                       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
                         Notification.requestPermission().catch(() => {});
                       }
@@ -1005,7 +1040,7 @@ function App() {
               <div className="sidebar-section">
                 <div
                   className={`channel ${!activeDmId ? 'selected' : ''}`}
-                  onClick={() => setActiveDmId(null)}
+                  onClick={() => { setActiveDmId(null); setDrawer(null); }}
                 >
                   <Users size={16} />
                   <span>Amigos</span>
@@ -1022,7 +1057,7 @@ function App() {
                   <div
                     key={t.id}
                     className={`channel ${activeDmId === t.id ? 'selected' : ''}`}
-                    onClick={() => setActiveDmId(t.id)}
+                    onClick={() => { setActiveDmId(t.id); setDrawer(null); }}
                   >
                     <div className="avatar xs" style={{ background: t.peer_avatar_color }}>
                       {(t.peer_display_name || t.peer_username)[0].toUpperCase()}
@@ -1212,7 +1247,7 @@ function App() {
       {/* Main Content */}
       <div className="main-stage">
         {hiddenVideoIds.length > 0 && remoteVideos.some(v => hiddenVideoIds.includes(v.id)) && (
-          <div style={{ background: '#1e1f22', padding: '6px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+          <div style={{ background: 'var(--bg-rail)', padding: '6px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
             <span style={{ color: 'var(--text-muted)' }}>Transmissão ocultada ({hiddenVideoIds.length})</span>
             <button type="button" className="btn-primary xs" onClick={() => setHiddenVideoIds([])}>
               Mostrar Transmissão
@@ -1366,7 +1401,11 @@ function App() {
           currentUser={user}
           typingUsers={typingUsers}
           showMembers={showMembers}
-          onToggleMembers={() => setShowMembers(v => !v)}
+          onToggleMembers={() => {
+            if (isMobile()) { setShowMembers(true); setDrawer(d => (d === 'members' ? null : 'members')); }
+            else setShowMembers(v => !v);
+          }}
+          onOpenNav={() => setDrawer('nav')}
           onSendMessage={handleSendMessage}
           onEditMessage={handleEditMessage}
           onDeleteMessage={handleDeleteMessage}
@@ -1383,6 +1422,7 @@ function App() {
           title={activeDm.peer_display_name}
           topic={`@${activeDm.peer_username}`}
           isDM
+          onOpenNav={() => setDrawer('nav')}
           messages={messages}
           currentUser={user}
           typingUsers={typingUsers}
@@ -1418,6 +1458,7 @@ function App() {
             setFriends(d.friends);
           }}
           onOpenDM={handleOpenDM}
+          onOpenNav={() => setDrawer('nav')}
         />
       )}
       </div>
@@ -1430,7 +1471,7 @@ function App() {
             <div
               className={`member nameplate-${m.nameplate_style || 'none'}`}
               key={m.id}
-              onClick={() => setSelectedProfile(m)}
+              onClick={() => { setSelectedProfile(m); setDrawer(null); }}
               title="Clique para ver perfil"
             >
               <div className={`avatar deco-${m.avatar_decoration || 'none'}`} style={{ background: m.avatar_color }}>
@@ -1443,7 +1484,7 @@ function App() {
               </div>
               <div className="member-info">
                 <div className="member-name">
-                  <span style={{ color: m.name_color || 'inherit' }}>{m.display_name}</span>
+                  <span style={{ color: nameColor(m.name_color) || 'inherit' }}>{m.display_name}</span>
                   {m.clan_tag && (
                     <span className="clan-tag-pill sm">{m.clan_icon || '💀'} {m.clan_tag}</span>
                   )}
@@ -1462,7 +1503,7 @@ function App() {
                 <div
                   className={`member offline nameplate-${m.nameplate_style || 'none'}`}
                   key={m.id}
-                  onClick={() => setSelectedProfile(m)}
+                  onClick={() => { setSelectedProfile(m); setDrawer(null); }}
                   title="Clique para ver perfil"
                 >
                   <div className={`avatar deco-${m.avatar_decoration || 'none'}`} style={{ background: m.avatar_color }}>
@@ -1475,7 +1516,7 @@ function App() {
                   </div>
                   <div className="member-info">
                     <div className="member-name">
-                      <span style={{ color: m.name_color || 'inherit' }}>{m.display_name}</span>
+                      <span style={{ color: nameColor(m.name_color) || 'inherit' }}>{m.display_name}</span>
                       {m.clan_tag && (
                         <span className="clan-tag-pill sm">{m.clan_icon || '💀'} {m.clan_tag}</span>
                       )}
@@ -1556,6 +1597,7 @@ function App() {
           }}
         />
       )}
+      {whatsNew && <WhatsNewModal all={whatsNew === 'all'} onClose={closeWhatsNew} />}
       {modal === 'notes' && (
         <NotesModal onClose={() => setModal(null)} isDemo={isDemo} />
       )}

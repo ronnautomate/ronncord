@@ -1,0 +1,215 @@
+/* ============================================================
+   Recursos trazidos do discordia (19/11/2026): temas, visor de imagem,
+   GIFs do KLIPY, "O que há de novo" e layout de celular.
+   Fica num arquivo separado pra não mexer no style.css original.
+   ============================================================ */
+
+:root {
+  --line: #3f4147;        /* bordas finas claras */
+  --text-soft: #dbdee1;   /* texto das mensagens */
+  --text-strong: #fff;    /* texto em item selecionado */
+  --stage: #111214;       /* fundo do palco de vídeo */
+}
+
+/* ===== TEMAS (cada um escolhe o seu em Perfil > Tema; fica salvo no navegador) ===== */
+[data-theme="grafite"] {
+  --bg-rail: #1d2026; --bg-sidebar: #23272e; --bg-chat: #2b2f36; --bg-input: #353a43;
+  --bg-hover: #2c3139; --bg-selected: #343a44; --bg-user: #1d2026; --border: #1a1d22;
+  --text: #e3e6ea; --text-muted: #8e96a3; --accent: #6b8cae; --accent-hover: #5a7a9b;
+  --green: #5fb98a; --red: #d46a6a; --line: #353a43; --text-soft: #d6dae0; --stage: #15171b;
+}
+[data-theme="meia-noite"] {
+  --bg-rail: #0d0f14; --bg-sidebar: #12151c; --bg-chat: #171a22; --bg-input: #222633;
+  --bg-hover: #1d212b; --bg-selected: #262b38; --bg-user: #0d0f14; --border: #0a0c10;
+  --text: #e6e9f2; --text-muted: #8089a0; --accent: #5865f2; --accent-hover: #4752c4;
+  --green: #3ba55d; --red: #ed4245; --line: #252a37; --text-soft: #d5d9e4; --stage: #08090d;
+}
+[data-theme="uva"] {
+  --bg-rail: #1a1520; --bg-sidebar: #211b29; --bg-chat: #272030; --bg-input: #362c41;
+  --bg-hover: #2e2638; --bg-selected: #3a3046; --bg-user: #1a1520; --border: #15111a;
+  --text: #eee6f5; --text-muted: #a094ad; --accent: #9b6fd0; --accent-hover: #8559bb;
+  --green: #6cc69a; --red: #e0707f; --line: #382e44; --text-soft: #e2d8eb; --stage: #120e16;
+}
+[data-theme="claro"] {
+  --bg-rail: #e3e5e8; --bg-sidebar: #f2f3f5; --bg-chat: #ffffff; --bg-input: #e8eaed;
+  --bg-hover: #e6e8eb; --bg-selected: #d8dbe0; --bg-user: #e8eaed; --border: #d5d8dd;
+  --text: #23272e; --text-muted: #626b78; --accent: #4a6fa5; --accent-hover: #3b5d8f;
+  --green: #23955a; --red: #d13f3f; --line: #d5d8dd; --text-soft: #2e3338; --text-strong: #111318;
+  --stage: #1e1f22;
+}
+
+/* com tema escolhido, bordas e textos fixos do style.css passam a seguir as variáveis do tema
+   (no tema padrão RONNCORD tudo fica igual ao original) */
+[data-theme] .rail-divider { background: var(--line); }
+[data-theme] .channel.selected { color: var(--text-strong); }
+[data-theme] .chat-topic { border-left: 1px solid var(--line); }
+[data-theme] .welcome { border-bottom: 1px solid var(--line); }
+[data-theme] .message-text { color: var(--text-soft); }
+[data-theme] .attachment-file { border: 1px solid var(--line); }
+[data-theme] .icon-btn.active { color: var(--text-strong); }
+[data-theme] .friends-tabs button.active { color: var(--text-strong); }
+[data-theme] .add-friend-form { border: 1px solid var(--line); }
+[data-theme] .friend-row { border-top: 1px solid var(--line); }
+[data-theme] .auth-card,
+[data-theme] .modal-card { border: 1px solid var(--line); }
+[data-theme] .auth-tabs button.active { color: var(--text-strong); }
+[data-theme] .auth-footer { border-top: 1px solid var(--line); }
+[data-theme] .invite-box code { color: var(--text-strong); }
+[data-theme] .screen-share-stage { background: var(--stage); }
+[data-theme] .screen-tile { border: 1px solid var(--line); }
+[data-theme] .voice-user.speaking .voice-user-name { color: var(--text-strong); }
+[data-theme] .noise-mode-card { border: 1px solid var(--line); }
+[data-theme] .mic-test-box { border: 1px solid var(--line); }
+[data-theme] .gif-btn { border: 1px solid var(--line); }
+[data-theme] .profile-card-preview { border: 1px solid var(--line); }
+[data-theme] .profile-custom-status { color: var(--text-soft); }
+[data-theme] .deco-chip { border: 1px solid var(--line); }
+[data-theme] .role-pill { color: var(--text-soft); }
+[data-theme] .user-volume-popover { border-top: 1px solid var(--line); }
+[data-theme] .pinned-item { border-bottom: 1px solid var(--line); }
+[data-theme] .pinned-item p { color: var(--text-soft); }
+[data-theme] .note-list-item.active { color: var(--text-strong); }
+[data-theme] .notes-editor input,
+[data-theme] .notes-editor textarea { border: 1px solid var(--line); }
+[data-theme] .music-now-playing { border: 1px solid var(--line); }
+
+.gif-grid { max-height: 300px; }
+/* ===== Tema (Perfil > Tema) ===== */
+.theme-section { display: flex; flex-direction: column; gap: 10px; }
+.theme-hint { color: var(--text-muted); font-size: 13px; }
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+.theme-option {
+  display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 10px;
+  background: var(--bg-input); border: 2px solid transparent; color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left;
+}
+.theme-option:hover { border-color: var(--line); }
+.theme-option.active { border-color: var(--accent); }
+.theme-sample {
+  position: relative; height: 54px; border-radius: 6px; overflow: hidden;
+  display: block; border: 1px solid rgba(0, 0, 0, 0.25);
+}
+.theme-sample i { position: absolute; left: 0; top: 0; bottom: 0; width: 32%; }
+.theme-sample b { position: absolute; left: 40%; right: 10%; bottom: 10px; height: 8px; border-radius: 4px; }
+/* ===== Visor de imagem ===== */
+.image-viewer {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0, 0, 0, 0.88);
+  display: flex; flex-direction: column; animation: viewer-in 0.12s ease-out;
+}
+@keyframes viewer-in { from { opacity: 0; } to { opacity: 1; } }
+.image-viewer-top {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px; color: #fff; font-size: 14px;
+}
+.image-viewer-name { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; overflow: hidden; white-space: nowrap; }
+.image-viewer-name span { opacity: 0.7; overflow: hidden; text-overflow: ellipsis; }
+.image-viewer-count { opacity: 0.8; font-variant-numeric: tabular-nums; }
+.image-viewer-top a, .image-viewer-top button {
+  display: inline-flex; align-items: center; gap: 6px; color: #fff; background: rgba(255, 255, 255, 0.12);
+  border: none; padding: 7px 12px; border-radius: 6px; text-decoration: none; font: inherit; font-size: 13px; cursor: pointer;
+}
+.image-viewer-top a:hover, .image-viewer-top button:hover { background: rgba(255, 255, 255, 0.22); }
+.image-viewer-stage { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: center; padding: 0 64px 24px; }
+.image-viewer-stage img {
+  max-width: 100%; max-height: calc(100vh - 90px); max-height: calc(100dvh - 90px);
+  object-fit: contain; border-radius: 6px; cursor: zoom-in; user-select: none;
+}
+.image-viewer-stage.zoom { place-items: start center; }
+.image-viewer-stage.zoom img { max-width: none; max-height: none; cursor: zoom-out; }
+.image-viewer-arrow {
+  position: absolute; top: 50%; transform: translateY(-50%); width: 46px; height: 46px; border-radius: 50%;
+  border: none; background: rgba(255, 255, 255, 0.12); color: #fff; display: grid; place-items: center; cursor: pointer;
+}
+.image-viewer-arrow:hover { background: rgba(255, 255, 255, 0.24); }
+.image-viewer-arrow.left { left: 12px; }
+.image-viewer-arrow.right { right: 12px; }
+.attachment-image-wrap { cursor: zoom-in; background: none; border: none; padding: 0; display: block; }
+.gif-empty { grid-column: 1 / -1; color: var(--text-muted); font-size: 13px; text-align: center; padding: 18px 6px; }
+.gif-credit { color: var(--text-muted); font-size: 10px; text-align: right; opacity: 0.8; }
+/* ===== O que há de novo ===== */
+.modal-card.whats-new { max-width: 560px; padding: 0; display: flex; flex-direction: column; max-height: 88vh; overflow: hidden; }
+.whats-new-top { padding: 22px 24px 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
+.whats-new-top h2 { font-size: 22px; }
+.whats-new-top small { color: var(--text-muted); font-size: 13px; }
+.whats-new-list { overflow-y: auto; padding: 4px 24px 20px; display: flex; flex-direction: column; gap: 18px; }
+.whats-new-item h3 { font-size: 16px; margin: 14px 0 6px; display: flex; align-items: center; gap: 8px; }
+.whats-new-tag { background: var(--red); color: #fff; font-size: 10px; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 4px; }
+.whats-new-item p { color: var(--text); opacity: 0.88; font-size: 14px; line-height: 1.5; }
+.whats-new-item img { width: auto; max-width: 100%; border-radius: 8px; margin-top: 10px; display: block; border: 1px solid var(--line); background: var(--bg-rail); }
+.whats-new-footer { padding: 14px 24px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; }
+.whats-new-footer .btn-primary { width: auto; padding: 10px 22px; }
+.server-logo.whats-new-btn { margin-top: auto; background: var(--bg-chat); color: var(--yellow); }
+.server-logo.whats-new-btn.has-new::after {
+  content: ''; position: absolute; top: 4px; right: 4px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--red); box-shadow: 0 0 0 3px var(--bg-rail);
+}
+.server-logo.whats-new-btn { position: relative; }
+/* ===== Celular (trazido do discordia): uma coluna só, gavetas dos lados ===== */
+.mobile-nav-btn,
+.drawer-backdrop { display: none; }
+.message.tapped .message-actions { display: flex; }
+@media (max-width: 640px) {
+  body, .app, .sidebar, .chat-area, .main-stage { height: 100dvh; }
+  .app { grid-template-columns: 1fr; width: 100%; }
+
+  /* gaveta esquerda: barra de servidores + canais (abre no ☰) */
+  .server-rail, .sidebar {
+    position: fixed; top: 0; bottom: 0; z-index: 60;
+    transition: transform 0.22s ease;
+    transform: translateX(calc(-100% - 72px - 6px));
+  }
+  .server-rail { left: 0; width: 72px; }
+  .sidebar { left: 72px; width: min(280px, calc(100vw - 72px - 44px)); box-shadow: 8px 0 24px rgba(0, 0, 0, 0.35); }
+  .app.drawer-nav .server-rail,
+  .app.drawer-nav .sidebar { transform: none; }
+
+  /* gaveta direita: membros (abre no ícone de pessoas) */
+  .members {
+    display: block !important;
+    position: fixed; top: 0; bottom: 0; right: 0; z-index: 60;
+    width: min(280px, 84vw);
+    transform: translateX(calc(100% + 6px)); transition: transform 0.22s ease;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+  }
+  .app.drawer-members .members { transform: none; }
+
+  .drawer-backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, 0.5); }
+  .mobile-nav-btn { display: grid; margin-left: -6px; flex-shrink: 0; }
+
+  /* cabeçalho do chat apertado: some o tópico e a busca encolhe */
+  .chat-header { padding: 0 10px; gap: 6px; }
+  .chat-header-title { min-width: 0; overflow: hidden; }
+  .chat-header-title strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-topic { display: none; }
+  .search-box { width: 110px; }
+  .search-box input { width: 100%; min-width: 0; }
+  .friends-tabs { margin-left: 4px; gap: 2px; overflow-x: auto; }
+  .friends-tabs button { padding: 4px 6px; white-space: nowrap; }
+
+  /* mensagens: sem hover no toque, tocar mostra as ações */
+  .message:hover .message-actions { display: none; }
+  .message.tapped .message-actions { display: flex; }
+  .message.tapped { background: var(--bg-hover); }
+  .message-actions button { padding: 8px; }
+  .attachment-image-wrap img { max-width: min(340px, 72vw); }
+  .reply-reference span { max-width: 55vw; }
+
+  /* campo de digitar: 16px pro iPhone não dar zoom */
+  input, textarea, select { font-size: 16px !important; }
+  .message-form { gap: 2px; }
+  .gif-picker-popover { position: fixed; left: 8px; right: 8px; bottom: 64px; width: auto; max-width: none; }
+
+  /* janelas cabem na tela e ficam por cima das gavetas */
+  .modal-backdrop { padding: 8px; z-index: 80; }
+  .modal-card { max-height: 92dvh; overflow-y: auto; padding: 18px; }
+  .modal-card.whats-new { padding: 0; }
+  .image-viewer-stage { padding: 0 8px 16px; }
+  .image-viewer-arrow { width: 38px; height: 38px; background: rgba(0, 0, 0, 0.45); }
+  .image-viewer-top a span { display: none; }
+
+  .screen-share-stage { grid-template-columns: 1fr; padding: 8px; max-height: 40dvh; }
+}
+/* barra "Voz Conectada" acompanha o tema (no padrão RONNCORD continua a cor original) */
+[data-theme] .voice-status-bar {
+  background: color-mix(in srgb, var(--green) 14%, var(--bg-user));
+  border-top-color: color-mix(in srgb, var(--green) 32%, var(--bg-user));
+}

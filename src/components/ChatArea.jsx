@@ -1,12 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Hash, AtSign, Search, Users, PlusCircle, Smile, SendHorizontal,
-  Reply, Pencil, Trash2, X, Paperclip, FileText, Pin, Mic, Square
+  Reply, Pencil, Trash2, X, Paperclip, FileText, Pin, Mic, Square, Menu
 } from 'lucide-react';
 import { resolveAssetUrl } from '../lib/api.js';
 import { GifPicker } from './GifPicker.jsx';
+import { ImageViewer } from './ImageViewer.jsx';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '🚀', '👀', '🎉', '💯'];
+
+function isImageAttachment(att) {
+  return att?.mimetype?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(att?.name || '');
+}
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -95,7 +100,8 @@ export function ChatArea({
   onTogglePin,
   onUploadFile,
   onTyping,
-  onSelectUser
+  onSelectUser,
+  onOpenNav
 }) {
   const [text, setText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -111,6 +117,8 @@ export function ChatArea({
   const [recording, setRecording] = useState(false);
   const [recordSec, setRecordSec] = useState(0);
   const [mentionQuery, setMentionQuery] = useState(null);
+  const [viewer, setViewer] = useState(null); // { images, index } do visor de imagem
+  const [tappedId, setTappedId] = useState(null); // celular: mensagem tocada mostra as ações
 
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -254,10 +262,32 @@ export function ChatArea({
       )
     : messages;
 
+  // todas as fotos do canal em ordem, pro visor passar de uma pra outra
+  const channelImages = [];
+  visibleMessages.forEach(m => (m.attachments || []).forEach(att => {
+    if (isImageAttachment(att)) {
+      channelImages.push({
+        url: resolveAssetUrl(att.url),
+        name: att.name,
+        author: m.author?.display_name || m.author?.username || ''
+      });
+    }
+  }));
+
+  function openViewer(url) {
+    const idx = channelImages.findIndex(im => im.url === url);
+    setViewer({ images: idx >= 0 ? channelImages : [{ url }], index: Math.max(0, idx) });
+  }
+
   return (
     <main className="chat-area">
       <header className="chat-header">
         <div className="chat-header-title">
+          {onOpenNav && (
+            <button type="button" className="icon-btn mobile-nav-btn" title="Servidores e canais" onClick={onOpenNav}>
+              <Menu size={20} />
+            </button>
+          )}
           {isDM ? <AtSign size={20} className="header-icon" /> : <Hash size={20} className="header-icon" />}
           <strong>{title}</strong>
           {topic && <span className="chat-topic">{topic}</span>}
@@ -346,7 +376,16 @@ export function ChatArea({
           const avatarColor = msg.author?.avatar_color || '#5865F2';
 
           return (
-            <div className={`message ${grouped ? 'grouped' : ''}`} key={msg.id}>
+            <div
+              className={`message ${grouped ? 'grouped' : ''} ${tappedId === msg.id ? 'tapped' : ''}`}
+              key={msg.id}
+              onClick={e => {
+                // no celular não tem hover: tocar na mensagem mostra reagir/responder/apagar
+                if (!window.matchMedia('(hover: none)').matches) return;
+                if (e.target.closest('button, a, input, audio, video, iframe')) return;
+                setTappedId(id => (id === msg.id ? null : msg.id));
+              }}
+            >
               {msg.reply_to && (
                 <div className="reply-reference">
                   <Reply size={12} />
@@ -412,13 +451,19 @@ export function ChatArea({
                     <div className="attachments-list">
                       {msg.attachments.map((att, idx) => {
                         const fullUrl = resolveAssetUrl(att.url);
-                        const isImg = att.mimetype?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(att.name || '');
+                        const isImg = isImageAttachment(att);
                         const isAudio = att.mimetype?.startsWith('audio/') || /\.(webm|ogg|mp3|wav)$/i.test(att.name || '');
                         if (isImg) {
                           return (
-                            <a key={idx} href={fullUrl} target="_blank" rel="noreferrer" className="attachment-image-wrap">
-                              <img src={fullUrl} alt={att.name} />
-                            </a>
+                            <button
+                              key={idx}
+                              type="button"
+                              className="attachment-image-wrap"
+                              title="Abrir imagem"
+                              onClick={e => { e.stopPropagation(); openViewer(fullUrl); }}
+                            >
+                              <img src={fullUrl} alt={att.name} loading="lazy" />
+                            </button>
                           );
                         }
                         if (isAudio) {
@@ -662,6 +707,10 @@ export function ChatArea({
           </button>
         </form>
       </div>
+
+      {viewer && (
+        <ImageViewer images={viewer.images} startIndex={viewer.index} onClose={() => setViewer(null)} />
+      )}
     </main>
   );
 }
