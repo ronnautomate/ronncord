@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Copy, Check, Hash, Volume2, Upload, Sparkles, MessageSquare, Search } from 'lucide-react';
 import { apiFetch, resolveAssetUrl } from '../lib/api.js';
+import { THEMES, getSavedTheme, applyTheme, nameColor as safeNameColor } from '../lib/themes.js';
 
 export function CreateOrJoinServerModal({ onClose, onCreateServer, onJoinServer, onImportDiscord }) {
   const [tab, setTab] = useState('create');
@@ -340,7 +341,8 @@ function parseBadges(raw) {
 }
 
 export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }) {
-  const [activeTab, setActiveTab] = useState('basic'); // 'basic' | 'visual' | 'clan'
+  const [activeTab, setActiveTab] = useState('basic'); // 'basic' | 'visual' | 'clan' | 'theme'
+  const [theme, setTheme] = useState(getSavedTheme);
   const [displayName, setDisplayName] = useState(user.display_name || '');
   const [pronouns, setPronouns] = useState(user.pronouns || '');
   const [customStatus, setCustomStatus] = useState(user.custom_status || '');
@@ -452,7 +454,7 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
 
               <div className="profile-preview-names">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <strong style={{ color: nameColor }}>{displayName || user.username}</strong>
+                  <strong style={{ color: safeNameColor(nameColor) || 'var(--text)' }}>{displayName || user.username}</strong>
                   {clanTag && (
                     <span className="clan-tag-pill">{clanIcon} {clanTag}</span>
                   )}
@@ -462,7 +464,7 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
             </div>
           </div>
 
-          <div className="auth-tabs" style={{ gridTemplateColumns: '1fr 1fr 1fr', marginBottom: 4 }}>
+          <div className="auth-tabs" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr', marginBottom: 4 }}>
             <button type="button" className={activeTab === 'basic' ? 'active' : ''} onClick={() => setActiveTab('basic')}>
               Perfil
             </button>
@@ -472,7 +474,32 @@ export function ProfileModal({ user, onClose, onSave, onUploadAvatar, onLogout }
             <button type="button" className={activeTab === 'clan' ? 'active' : ''} onClick={() => setActiveTab('clan')}>
               Clã & Insígnias
             </button>
+            <button type="button" className={activeTab === 'theme' ? 'active' : ''} onClick={() => setActiveTab('theme')}>
+              Tema
+            </button>
           </div>
+
+          {activeTab === 'theme' && (
+            <div className="theme-section">
+              <p className="theme-hint">Muda só pra você, na hora. Não precisa salvar.</p>
+              <div className="theme-grid">
+                {THEMES.map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`theme-option ${theme === t.id ? 'active' : ''}`}
+                    onClick={() => setTheme(applyTheme(t.id))}
+                  >
+                    <span className="theme-sample" style={{ background: t.chat }}>
+                      <i style={{ background: t.side }} />
+                      <b style={{ background: t.dot }} />
+                    </span>
+                    <span>{t.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {activeTab === 'basic' && (
             <>
@@ -738,7 +765,7 @@ export function UserProfileModal({ member, currentUserId, onClose, onSendDM, onQ
 
           <div className="profile-preview-names" style={{ marginBottom: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <strong style={{ fontSize: 19, color: member.name_color || '#f2f3f5' }}>{member.display_name}</strong>
+              <strong style={{ fontSize: 19, color: safeNameColor(member.name_color) || 'var(--text)' }}>{member.display_name}</strong>
               {member.clan_tag && (
                 <span className="clan-tag-pill">{member.clan_icon || '💀'} {member.clan_tag}</span>
               )}
