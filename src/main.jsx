@@ -4,7 +4,7 @@ import {
   Hash, Volume2, VolumeX, Plus, Settings, Mic, MicOff, Headphones, HeadphoneOff,
   UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff,
   MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2, X,
-  Lock, Music
+  Lock, Music, Download
 } from 'lucide-react';
 import { apiFetch, connectSocket, getToken, setToken, resolveAssetUrl } from './lib/api.js';
 import { VoiceManager, getSavedUserVolumes } from './lib/voiceManager.js';
@@ -35,6 +35,11 @@ import { applyTheme, getSavedTheme, nameColor } from './lib/themes.js';
 import { isAvisoMessage, avisoText } from './lib/aviso.js';
 
 applyTheme(getSavedTheme());
+
+// instalar como app (Chrome, Edge, Opera no PC): registra o service worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {});
+}
 
 const DEMO_USER = {
   id: 'demo-user',
@@ -191,6 +196,18 @@ function App() {
     }
   }, [activeChannelId, activeDmId, viewMode]);
 
+  // botão "Instalar app": o navegador avisa quando dá pra instalar
+  const [installPrompt, setInstallPrompt] = useState(null);
+  useEffect(() => {
+    const onPrompt = e => { e.preventDefault(); setInstallPrompt(e); };
+    const onInstalled = () => setInstallPrompt(null);
+    window.addEventListener('beforeinstallprompt', onPrompt);
+    window.addEventListener('appinstalled', onInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onPrompt);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
+  }, []);
   const [drawer, setDrawer] = useState(null); // celular: null | 'nav' (servidores+canais) | 'members'
   const [whatsNew, setWhatsNew] = useState(null); // null | 'new' (sozinho) | 'all' (botão ✨)
   const [hasNews, setHasNews] = useState(() => NOVIDADES.items.some(it => isNew(it)));
@@ -200,6 +217,9 @@ function App() {
   const [userVolumes, setUserVolumes] = useState(getSavedUserVolumes);
   const socketRef = useRef(null);
   const lastReassertRef = useRef(0);
+  // mensagens de cada canal/DM guardadas na memória: trocar de chat mostra na hora e atualiza por trás
+  const messagesCacheRef = useRef({}); // channelId ou dmThreadId -> mensagens
+  const screenSharersRef = useRef(new Set()); // quem tava transmitindo na minha call (pro som da tela)
   const [sidebarMode, setSidebarMode] = useState('server'); // barra esquerda: 'server' (canais + DMs) | 'home' (amigos + DMs)
   const voiceManagerRef = useRef(null);
   const voiceChannelIdRef = useRef(null);
@@ -256,6 +276,7 @@ function App() {
         setFriends(frData.friends);
         setDmThreads(dmData.threads);
         joinAllRooms(srvData.servers, dmData.threads);
+        prefetchMessages(srvData.servers, dmData.threads);
 
         if (srvData.servers.length > 0) {
           const first = srvData.servers[0];
@@ -295,6 +316,21 @@ function App() {
           joinedRooms.add(`d:${t.id}`);
           socket.emit('join_dm', t.id);
         }
+      }
+    }
+    async function prefetchMessages(srvList, threads) {
+      const jobs = [];
+      for (const srv of srvList || []) {
+        for (const ch of srv.channels || []) if (ch.type === 'text') jobs.push([ch.id, `/api/channels/${ch.id}/messages`]);
+      }
+      for (const t of threads || []) jobs.push([t.id, `/api/dms/${t.id}/messages`]);
+      for (const [key, url] of jobs) {
+        if (!mounted) return;
+        if (messagesCacheRef.current[key]) continue;
+        try {
+          const d = await apiFetch(url);
+          if (!messagesCacheRef.current[key]) messagesCacheRef.current[key] = d.messages;
+        } catch {}
       }
     }
     async function refreshDmThreads() {
@@ -344,15 +380,23 @@ function App() {
         }
 
         if (msg.dm_thread_id) setDmActivity(prev => ({ ...prev, [msg.dm_thread_id]: msg.created_at || Date.now() }));
+        const cached = targetKey && messagesCacheRef.current[targetKey];
+        if (cached && !cached.some(m => m.id === msg.id)) messagesCacheRef.current[targetKey] = [...cached, msg];
 
         if (isCurrentlyOpen) {
           setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
         }
       });
       socket.on('message:updated', msg => {
+        const key = msg.channel_id || msg.dm_thread_id;
+        const cached = key && messagesCacheRef.current[key];
+        if (cached) messagesCacheRef.current[key] = cached.map(m => (m.id === msg.id ? msg : m));
         setMessages(prev => prev.map(m => (m.id === msg.id ? msg : m)));
       });
-      socket.on('message:deleted', ({ id }) => {
+      socket.on('message:deleted', ({ id, channel_id, dm_thread_id }) => {
+        const key = channel_id || dm_thread_id;
+        const cached = key && messagesCacheRef.current[key];
+        if (cached) messagesCacheRef.current[key] = cached.filter(m => m.id !== id);
         setMessages(prev => prev.filter(m => m.id !== id));
       });
       socket.on('channel:created', ch => {
@@ -372,6 +416,12 @@ function App() {
       socket.on('server:updated', srv => {
         if (!srv?.id) return;
         setServers(prev => prev.map(s => (s.id === srv.id ? { ...s, name: srv.name, icon_color: srv.icon_color, icon_url: srv.icon_url } : s)));
+      });
+      socket.on('server:member_role', ({ serverId, userId, role }) => {
+        setServers(prev => prev.map(s => (s.id === serverId
+          ? { ...s, members: s.members.map(m => (m.id === userId ? { ...m, role } : m)), my_role: userId === user.id ? role : s.my_role }
+          : s)));
+        setSelectedProfile(p => (p && p.id === userId ? { ...p, role } : p));
       });
       socket.on('server:member_joined', ({ serverId, member }) => {
         if (!member) return;
@@ -467,6 +517,10 @@ function App() {
       });
       socket.on('voice:participants', ({ channelId, participants }) => {
         if (voiceChannelIdRef.current === channelId) {
+          const sharing = new Set(participants.filter(p => p.screenSharing).map(p => p.socketId));
+          const started = [...sharing].some(sid => sid !== socket.id && !screenSharersRef.current.has(sid));
+          if (started && voiceCountRef.current > 0) SoundFX.screenShare(); // ao entrar na call não apita por tela que já tava aberta
+          screenSharersRef.current = sharing;
           const prevCount = voiceCountRef.current;
           if (participants.length > prevCount && prevCount > 0) SoundFX.userJoined();
           else if (participants.length < prevCount && participants.length > 0) SoundFX.userLeft();
@@ -487,7 +541,14 @@ function App() {
           setRemoteVideos(videos);
           setHiddenVideoIds(prev => prev.filter(id => videos.some(v => v.id === id)));
         },
-        onError: msg => alert(msg)
+        onError: msg => alert(msg),
+        // parou pela barra do Chrome ("Parar compartilhamento"): a tela some daqui também
+        onScreenEnded: () => {
+          setIsScreenSharing(false);
+          setLocalScreenStream(null);
+          setHideMyScreen(false);
+          SoundFX.streamStop();
+        }
       });
     }
 
@@ -510,8 +571,13 @@ function App() {
         return;
       }
       socketRef.current?.emit('join_channel', activeChannelId);
-      apiFetch(`/api/channels/${activeChannelId}/messages`)
-        .then(data => setMessages(data.messages))
+      const key = activeChannelId;
+      setMessages(messagesCacheRef.current[key] || []);
+      apiFetch(`/api/channels/${key}/messages`)
+        .then(data => {
+          messagesCacheRef.current[key] = data.messages;
+          if (activeChannelIdRef.current === key && viewModeRef.current === 'server') setMessages(data.messages);
+        })
         .catch(console.error);
       return;
     }
@@ -521,8 +587,13 @@ function App() {
         return;
       }
       socketRef.current?.emit('join_dm', activeDmId);
-      apiFetch(`/api/dms/${activeDmId}/messages`)
-        .then(data => setMessages(data.messages))
+      const key = activeDmId;
+      setMessages(messagesCacheRef.current[key] || []);
+      apiFetch(`/api/dms/${key}/messages`)
+        .then(data => {
+          messagesCacheRef.current[key] = data.messages;
+          if (activeDmIdRef.current === key && viewModeRef.current === 'home') setMessages(data.messages);
+        })
         .catch(console.error);
     }
   }, [user, isDemo, viewMode, activeChannelId, activeDmId]);
@@ -923,9 +994,11 @@ function App() {
         const stream = await voiceManagerRef.current?.startScreenShare();
         setIsScreenSharing(true);
         setLocalScreenStream(stream || null);
-        SoundFX.streamStart();
+        SoundFX.screenShare();
       } catch (err) {
-        if (err.name !== 'NotAllowedError') {
+        if (err.name === 'NoScreenAudio') {
+          alert('A tela vai sempre com som. Na janela do Chrome, deixa ligado o "Compartilhar áudio" e tenta de novo.');
+        } else if (err.name !== 'NotAllowedError') {
           alert('Erro ao compartilhar tela: ' + err.message);
         }
       }
@@ -1041,6 +1114,10 @@ function App() {
   }
 
   const currentTypingKey = viewMode === 'server' ? activeChannelId : activeDmId;
+  // só as mensagens do chat aberto (evita piscar as do chat anterior no instante da troca)
+  const chatMessages = messages.filter(m =>
+    viewMode === 'server' ? (!m.channel_id || m.channel_id === activeChannelId) : (!m.dm_thread_id || m.dm_thread_id === activeDmId)
+  );
   const typingUsers = Object.values(typingMap[currentTypingKey] || {});
 
   const textChannels = activeServer?.channels?.filter(c => c.type === 'text') || [];
@@ -1114,6 +1191,9 @@ function App() {
             ) : (
               srv.name.slice(0, 2).toUpperCase()
             )}
+            {voiceChannelId && srv.channels?.some(c => c.id === voiceChannelId) && (
+              <span className="rail-voice-badge" title="Você está numa call deste servidor"><Volume2 size={11} /></span>
+            )}
           </button>
         ))}
 
@@ -1124,6 +1204,20 @@ function App() {
         >
           <Plus size={22} />
         </button>
+
+        {installPrompt && (
+          <button
+            className="server-logo install-app-btn"
+            title="Instalar o RONNCORD como app no PC"
+            onClick={async () => {
+              installPrompt.prompt();
+              try { await installPrompt.userChoice; } catch {}
+              setInstallPrompt(null);
+            }}
+          >
+            <Download size={20} />
+          </button>
+        )}
 
         <button
           className={`server-logo whats-new-btn ${hasNews ? 'has-new' : ''}`}
@@ -1525,7 +1619,7 @@ function App() {
         <ChatArea
           title={activeChannel.name}
           topic={activeChannel.topic}
-          messages={messages}
+          messages={chatMessages}
           members={activeServer?.members || []}
           currentUser={user}
           typingUsers={typingUsers}
@@ -1552,7 +1646,7 @@ function App() {
           topic={`@${activeDm.peer_username}`}
           isDM
           onOpenNav={() => setDrawer('nav')}
-          messages={messages}
+          messages={chatMessages}
           currentUser={user}
           typingUsers={typingUsers}
           onSendMessage={handleSendMessage}
@@ -1697,8 +1791,13 @@ function App() {
       )}
       {selectedProfile && (
         <UserProfileModal
-          member={selectedProfile}
+          member={(activeServer?.members || []).find(m => m.id === selectedProfile.id) ? { ...selectedProfile, role: activeServer.members.find(m => m.id === selectedProfile.id).role } : selectedProfile}
           currentUserId={user.id}
+          canManageRoles={!isDemo && activeServer?.my_role === 'owner'}
+          onSetRole={async (userId, role) => {
+            await apiFetch(`/api/servers/${activeServer.id}/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) });
+            setServers(prev => prev.map(s => (s.id === activeServer.id ? { ...s, members: s.members.map(m => (m.id === userId ? { ...m, role } : m)) } : s)));
+          }}
           onClose={() => setSelectedProfile(null)}
           onSendDM={handleOpenDM}
           onQuickDmMessage={async (targetUserId, content) => {
