@@ -6,6 +6,7 @@ import {
 import { resolveAssetUrl } from '../lib/api.js';
 import { GifPicker } from './GifPicker.jsx';
 import { ImageViewer } from './ImageViewer.jsx';
+import { VoicePlayer } from './VoicePlayer.jsx';
 import { isAvisoMessage, avisoText, SLASH_COMMANDS } from '../lib/aviso.js';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '🚀', '👀', '🎉', '💯'];
@@ -168,6 +169,52 @@ export function ChatArea({
     }
   }
 
+  // colar (Ctrl+V) e arrastar arquivos pro chat, igual no discordia/Discord
+  async function uploadFiles(files) {
+    const list = Array.from(files || []).filter(f => f && f.size > 0);
+    if (!list.length) return;
+    setUploading(true);
+    try {
+      for (const f of list.slice(0, 10)) {
+        // print colado vem sem nome: dá um nome com a data
+        const file = f.name && f.name !== 'image.png'
+          ? f
+          : new File([f], `imagem-${Date.now()}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type });
+        const uploaded = await onUploadFile(file);
+        setAttachments(prev => [...prev, uploaded]);
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setUploading(false);
+      textInputRef.current?.focus();
+    }
+  }
+
+  function handlePaste(e) {
+    const files = Array.from(e.clipboardData?.items || [])
+      .filter(it => it.kind === 'file')
+      .map(it => it.getAsFile())
+      .filter(Boolean);
+    if (files.length) {
+      e.preventDefault();
+      uploadFiles(files);
+    }
+  }
+
+  const [dragging, setDragging] = useState(false);
+  function handleDragOver(e) {
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+    e.preventDefault();
+    setDragging(true);
+  }
+  function handleDrop(e) {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    setDragging(false);
+    uploadFiles(e.dataTransfer.files);
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!text.trim() && attachments.length === 0) return;
@@ -287,7 +334,14 @@ export function ChatArea({
   }
 
   return (
-    <main className="chat-area">
+    <main
+      className={`chat-area ${dragging ? 'dragging-files' : ''}`}
+      onPaste={handlePaste}
+      onDragOver={handleDragOver}
+      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false); }}
+      onDrop={handleDrop}
+    >
+      {dragging && <div className="drop-overlay"><div>Solte pra enviar em {isDM ? '@' : '#'}{title}</div></div>}
       <header className="chat-header">
         <div className="chat-header-title">
           {onOpenNav && (
@@ -479,7 +533,7 @@ export function ChatArea({
                         }
                         if (isAudio) {
                           return (
-                            <audio key={idx} controls src={fullUrl} className="attachment-audio" />
+                            <VoicePlayer key={idx} src={fullUrl} name={att.name} />
                           );
                         }
                         return (
