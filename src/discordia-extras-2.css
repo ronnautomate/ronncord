@@ -1,0 +1,15 @@
+/* Ajustes depois da 2ª leva do discordia (19/11/2026). Arquivo separado pra não reenviar o CSS grande. */
+/* menu de volume aberto pelo clique direito na lista da voz (fecha clicando fora) */
+.volume-menu-backdrop { position: fixed; inset: 0; z-index: 119; }
+
+/* ===== DMs na barrinha dos ícones (igual Discord) ===== */
+.server-logo.rail-dm { position: relative; color: #fff; overflow: visible; }
+.server-logo.rail-dm .server-icon-img { border-radius: 50%; transition: border-radius 0.18s ease; }
+.server-logo.rail-dm:hover .server-icon-img,
+.server-logo.rail-dm.active .server-icon-img { border-radius: 16px; }
+.server-logo.rail-dm.active { box-shadow: 0 0 0 2px var(--accent); }
+.rail-dm-badge {
+  position: absolute; right: -4px; bottom: -4px; min-width: 20px; height: 20px; padding: 0 5px;
+  border-radius: 10px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700;
+  display: grid; place-items: center; box-shadow: 0 0 0 3px var(--bg-rail);
+}
