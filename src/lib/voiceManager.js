@@ -493,9 +493,29 @@ export class VoiceManager {
         suppressLocalAudioPlayback: false,
         echoCancellation: false,
         noiseSuppression: false,
-        autoGainControl: false
-      }
+        autoGainControl: false,
+        // tira do som da tela o que sai desta aba (as vozes da call): sem isso quem assiste
+        // escuta a própria voz de volta. Chrome/Edge 141+; navegador que não conhece só ignora
+        restrictOwnAudio: true
+      },
+      systemAudio: 'include',        // "Compartilhar áudio" já vem ligado na janela do Chrome
+      windowAudio: 'system',         // janela também leva som (Chrome 142+ no Windows)
+      selfBrowserSurface: 'exclude', // a própria aba do ronncord não aparece na lista
+      surfaceSwitching: 'include'    // botão do Chrome pra trocar de aba sem parar a transmissão
     });
+    // tela sempre com som: se a pessoa desligou o áudio, cancela e pede de novo.
+    // Aba tem áudio em qualquer sistema; janela/tela inteira só no Windows e no ChromeOS
+    // (no Mac e no Linux o Chrome não pega o som do sistema, aí deixa ir sem som).
+    if (stream.getAudioTracks().length === 0) {
+      const surface = stream.getVideoTracks()[0]?.getSettings?.().displaySurface;
+      const sistemaComSom = /Windows|CrOS/i.test(navigator.userAgent);
+      if (surface === 'browser' || sistemaComSom) {
+        stream.getTracks().forEach(t => t.stop());
+        const err = new Error('Compartilhe com o áudio ligado');
+        err.name = 'NoScreenAudio';
+        throw err;
+      }
+    }
     this.screenStream = stream;
     // Ensure mic pipeline AudioContext stays running and wasn't interrupted by getDisplayMedia
     if (this.pipeline?.context?.state === 'suspended') {
