@@ -30,6 +30,7 @@ import { CallStage } from './components/CallStage.jsx';
 import { NOVIDADES, isNew, markSeen } from './lib/novidades.js';
 import './style.css';
 import './discordia-extras.css';
+import './discordia-extras-2.css';
 import { applyTheme, getSavedTheme, nameColor } from './lib/themes.js';
 import { isAvisoMessage, avisoText } from './lib/aviso.js';
 
@@ -131,6 +132,7 @@ function App() {
   const [pttActive, setPttActive] = useState(false);
   const [screenVolumes, setScreenVolumes] = useState({});
   const [unreadCounts, setUnreadCounts] = useState({});
+  const [dmActivity, setDmActivity] = useState({}); // threadId -> hora da última mensagem (ordena as DMs na barrinha)
   const [musicState, setMusicState] = useState(null);
   const [musicVolume, setMusicVolume] = useState(() => {
     const saved = parseFloat(localStorage.getItem('ronncord_music_vol'));
@@ -340,6 +342,8 @@ function App() {
             }
           }
         }
+
+        if (msg.dm_thread_id) setDmActivity(prev => ({ ...prev, [msg.dm_thread_id]: msg.created_at || Date.now() }));
 
         if (isCurrentlyOpen) {
           setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
@@ -962,6 +966,13 @@ function App() {
 
   const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
 
+  useEffect(() => {
+    if (!volumeTarget) return;
+    const onKey = e => e.key === 'Escape' && setVolumeTarget(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [volumeTarget]);
+
   // pessoa da DM: a foto e o status vêm da lista de membros dos servidores (a API de DMs só manda a cor)
   function findPerson(userId) {
     for (const srv of servers) {
@@ -987,6 +998,15 @@ function App() {
       isMe
     };
   });
+
+  const railDms = dmThreads
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) =>
+      ((unreadCounts[b.t.id] || 0) > 0) - ((unreadCounts[a.t.id] || 0) > 0) ||
+      (dmActivity[b.t.id] || 0) - (dmActivity[a.t.id] || 0) ||
+      a.i - b.i
+    )
+    .map(x => x.t);
 
   function renderDmRow(t) {
     const person = findPerson(t.peer_id);
@@ -1050,6 +1070,28 @@ function App() {
         >
           <Compass size={22} />
         </button>
+
+        {railDms.map(t => {
+          const person = findPerson(t.peer_id);
+          const name = t.peer_display_name || t.peer_username || '?';
+          const unread = unreadCounts[t.id] || 0;
+          return (
+            <button
+              key={`dm-${t.id}`}
+              className={`server-logo rail-dm ${viewMode === 'home' && activeDmId === t.id ? 'active' : ''}`}
+              style={{ background: person?.avatar_color || t.peer_avatar_color }}
+              title={`DM com ${name}`}
+              onClick={() => { setSidebarMode('home'); setViewMode('home'); setActiveDmId(t.id); setDrawer(null); }}
+            >
+              {person?.avatar_url ? (
+                <img src={resolveAssetUrl(person.avatar_url)} alt={name} className="server-icon-img" />
+              ) : (
+                name[0].toUpperCase()
+              )}
+              {unread > 0 && <span className="rail-dm-badge">{unread > 99 ? '99+' : unread}</span>}
+            </button>
+          );
+        })}
 
         <div className="rail-divider" />
 
@@ -1204,7 +1246,12 @@ function App() {
                               onContextMenu={e => {
                                 if (p.userId !== user.id) {
                                   e.preventDefault();
-                                  setVolumeTarget(prev => (prev?.userId === p.userId ? null : p));
+                                  // mesmo menu flutuante da sala (abre onde clicou)
+                                  setVolumeTarget({
+                                    ...p,
+                                    x: Math.max(8, Math.min(e.clientX, window.innerWidth - 260)),
+                                    y: Math.max(8, Math.min(e.clientY + 10, window.innerHeight - 180))
+                                  });
                                 }
                               }}
                             >
@@ -1248,17 +1295,6 @@ function App() {
                   );
                 })}
               </div>
-
-              <div className="sidebar-section">
-                <div className="section-heading">
-                  <p className="section-label">MENSAGENS DIRETAS</p>
-                  <button className="icon-btn xs" title="Nova Mensagem Direta" onClick={() => setModal('new-dm')}>
-                    <Plus size={14} />
-                  </button>
-                </div>
-                {dmThreads.length === 0 && <p className="sidebar-empty">Nenhuma DM ainda. Clique no + ou no perfil de alguém.</p>}
-                {dmThreads.map(t => renderDmRow(t))}
-              </div>
             </div>
           </>
         ) : (
@@ -1290,69 +1326,46 @@ function App() {
         )}
 
         {volumeTarget && (
-          <div className="user-volume-popover">
-            <div className="user-volume-header">
-              <strong>Volume de {volumeTarget.displayName}</strong>
-              <span>{userVolumes[volumeTarget.userId] ?? 100}%</span>
+          <>
+            <div className="volume-menu-backdrop" onClick={() => setVolumeTarget(null)} onContextMenu={e => { e.preventDefault(); setVolumeTarget(null); }} />
+            <div className="call-volume-menu" style={{ left: volumeTarget.x, top: volumeTarget.y }}>
+              <b>{volumeTarget.displayName}</b>
+              <div className="vol-row"><span>Volume da voz</span><span>{userVolumes[volumeTarget.userId] ?? 100}%</span></div>
+              <input
+                type="range"
+                min={0}
+                max={400}
+                step={10}
+                value={userVolumes[volumeTarget.userId] ?? 100}
+                onChange={e => {
+                  const val = Number(e.target.value);
+                  voiceManagerRef.current?.setUserVolume(volumeTarget.userId, val);
+                  setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: val }));
+                }}
+              />
+              <div className="vol-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = (userVolumes[volumeTarget.userId] ?? 100) === 0 ? 100 : 0;
+                    voiceManagerRef.current?.setUserVolume(volumeTarget.userId, next);
+                    setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: next }));
+                  }}
+                >
+                  {(userVolumes[volumeTarget.userId] ?? 100) === 0 ? 'Desmutar' : 'Mutar pra mim'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    voiceManagerRef.current?.setUserVolume(volumeTarget.userId, 100);
+                    setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 100 }));
+                  }}
+                >
+                  Voltar a 100%
+                </button>
+              </div>
             </div>
-            <input
-              type="range"
-              min={0}
-              max={400}
-              step={10}
-              value={userVolumes[volumeTarget.userId] ?? 100}
-              onChange={e => {
-                const val = Number(e.target.value);
-                voiceManagerRef.current?.setUserVolume(volumeTarget.userId, val);
-                setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: val }));
-              }}
-            />
-            <div className="user-volume-actions">
-              <button
-                type="button"
-                className="btn-ghost xs"
-                onClick={() => {
-                  voiceManagerRef.current?.setUserVolume(volumeTarget.userId, 0);
-                  setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 0 }));
-                }}
-              >
-                0%
-              </button>
-              <button
-                type="button"
-                className="btn-ghost xs"
-                onClick={() => {
-                  voiceManagerRef.current?.setUserVolume(volumeTarget.userId, 100);
-                  setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 100 }));
-                }}
-              >
-                100%
-              </button>
-              <button
-                type="button"
-                className="btn-ghost xs"
-                onClick={() => {
-                  voiceManagerRef.current?.setUserVolume(volumeTarget.userId, 250);
-                  setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 250 }));
-                }}
-              >
-                250%
-              </button>
-              <button
-                type="button"
-                className="btn-ghost xs"
-                onClick={() => {
-                  voiceManagerRef.current?.setUserVolume(volumeTarget.userId, 400);
-                  setUserVolumes(prev => ({ ...prev, [volumeTarget.userId]: 400 }));
-                }}
-              >
-                400%
-              </button>
-              <button type="button" className="btn-primary xs" onClick={() => setVolumeTarget(null)}>
-                OK
-              </button>
-            </div>
-          </div>
+          </>
         )}
 
         {voiceChannelId && (
