@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Volume2, VolumeX, Mic, MicOff, Video, VideoOff, MonitorUp, MonitorOff, Music, Sliders,
-  PhoneOff, Maximize2, MonitorX, Monitor, Minus, Plus, Headphones, HeadphoneOff, Menu
+  PhoneOff, Maximize2, MonitorX, Monitor, Headphones, HeadphoneOff, Menu
 } from 'lucide-react';
 import { resolveAssetUrl } from '../lib/api.js';
 import { SCREEN_QUALITIES } from '../lib/voiceManager.js';
@@ -10,12 +10,25 @@ import { SCREEN_QUALITIES } from '../lib/voiceManager.js';
 //  SALA DE VOZ (layout trazido do discordia)
 //  - um bloco por pessoa (foto ou câmera), borda verde em quem fala
 //  - com tela compartilhada: tela grande | alça de arrastar | coluna das câmeras
-//  - cada um escolhe o tamanho das câmeras (slider) e da coluna (alça), salvo no navegador
+//  - sem tela: os blocos se ajeitam sozinhos pra ocupar o espaço (igual Discord)
+//  - com tela: cada um escolhe a largura da coluna (alça), salvo no navegador
 //  - volume por pessoa e por stream (botão no canto ou clique direito), mutar a stream
 //  - sair da stream sem sair da call (e voltar a assistir)
 // ============================================================
 
-const CAM_DEFAULT = 420;
+const GAP = 12;
+
+// acha quantas colunas deixam os blocos (16:9) do maior tamanho possível no espaço
+function bestFit(n, W, H) {
+  if (!n || W <= 0 || H <= 0) return 420;
+  let best = 0;
+  for (let c = 1; c <= n; c++) {
+    const r = Math.ceil(n / c);
+    const w = Math.min((W - GAP * (c - 1)) / c, ((H - GAP * (r - 1)) / r) * 16 / 9);
+    if (w > best) best = w;
+  }
+  return Math.max(120, Math.floor(best));
+}
 const SIDE_DEFAULT = 200;
 const readNum = (key, def) => {
   const n = Number(localStorage.getItem(key));
@@ -99,12 +112,11 @@ export function CallStage({
   onOpenNav
 }) {
   const [focusId, setFocusId] = useState(null);
-  const [camSize, setCamSize] = useState(() => readNum('ronncord_cam_size', CAM_DEFAULT));
+  const [camSize, setCamSize] = useState(420);
   const [side, setSide] = useState(() => readNum('ronncord_stage_side', SIDE_DEFAULT));
   const [menu, setMenu] = useState(null); // { x, y, type: 'voice'|'screen', person, socketId }
   const stageRef = useRef(null);
 
-  useEffect(() => { localStorage.setItem('ronncord_cam_size', String(camSize)); }, [camSize]);
   useEffect(() => { localStorage.setItem('ronncord_stage_side', String(side)); }, [side]);
 
   // fecha o menu de volume clicando fora ou no Esc
@@ -163,12 +175,22 @@ export function CallStage({
     handle.addEventListener('pointercancel', stop, { once: true });
   }
 
-  // Ctrl + rodinha nas câmeras muda o tamanho (sem tela)
-  function onWheel(e) {
-    if (!e.ctrlKey || focus) return;
-    e.preventDefault();
-    setCamSize(s => Math.max(160, Math.min(1200, s + (e.deltaY < 0 ? 40 : -40))));
-  }
+  // sem tela em foco: mede o espaço e recalcula o tamanho dos blocos (janela, gente entrando/saindo)
+  const tileCount = focus ? 0 : leftScreens.length + people.length;
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || !tileCount) return;
+    const measure = () => {
+      const cs = getComputedStyle(el);
+      const W = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 1;
+      const H = el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 1;
+      setCamSize(bestFit(tileCount, W, H));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tileCount]);
 
   function volTag(p) {
     if (p.isMe) return null;
@@ -282,7 +304,6 @@ export function CallStage({
         ref={stageRef}
         className={`call-stage ${focus ? 'with-screen' : ''}`}
         style={{ '--cam-size': `${camSize}px`, '--side': `${side}px` }}
-        onWheel={onWheel}
       >
         {people.length === 0 && <p className="call-empty">Conectando...</p>}
         {focus ? (
@@ -330,13 +351,6 @@ export function CallStage({
         <button type="button" className="leave" title="Sair da call" onClick={onLeave}>
           <PhoneOff size={22} />
         </button>
-        {!focus && (
-          <div className="call-zoom" title="Tamanho das câmeras (ou Ctrl + rodinha)">
-            <button type="button" onClick={() => setCamSize(s => Math.max(160, s - 40))}><Minus size={16} /></button>
-            <input type="range" min={160} max={1200} step={10} value={camSize} onChange={e => setCamSize(Number(e.target.value))} />
-            <button type="button" onClick={() => setCamSize(s => Math.min(1200, s + 40))}><Plus size={16} /></button>
-          </div>
-        )}
       </div>
 
       {menu && (

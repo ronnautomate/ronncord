@@ -3,42 +3,83 @@
 // (a versão em que entraram). Imagens ficam em public/novidades/<versão>/.
 // Versões comparam como texto: "2026-11-19" < "2026-11-19b" < "2026-11-20".
 export const NOVIDADES = {
-  version: '2026-11-19b',
+  version: '2026-11-19c',
   date: '19 de novembro de 2026',
   items: [
     {
-      title: 'Sala de voz nova 🔊',
-      text: 'Clique no canal de voz e a sala abre no meio da tela: um bloco por pessoa (foto ou câmera), borda verde em quem fala e botões redondos embaixo. O slider no canto muda o tamanho das câmeras.'
+      title: 'Cartão de perfil 🪪',
+      text: 'Clicar em alguém (call, membros ou chat) abre um cartão pequeno do lado, igual no Discord, com bio, cargo e um campo pra mandar mensagem na hora.'
     },
     {
+      title: 'Compartilhar tela com som',
+      text: 'A tela vai sempre com o som ligado, e **as vozes da call não vão junto** (ninguém escuta a própria voz de volta). A aba do RONNCORD nem aparece mais na lista.'
+    },
+    {
+      title: 'Call que se ajeita sozinha',
+      text: 'Sem tela compartilhada, os blocos crescem e se organizam sozinhos conforme o tamanho da janela e quem entra ou sai.'
+    },
+    {
+      title: 'Colar e arrastar imagem',
+      text: '**Ctrl+V** cola print direto no chat, e dá pra arrastar arquivos pra conversa.'
+    },
+    {
+      title: 'Player de áudio novo',
+      text: 'Áudios e mensagens de voz ganharam um player escuro com barra pra pular e o tempo do lado.'
+    },
+    {
+      title: 'Troca de chat instantânea',
+      text: 'Ir de DM pra canal (e voltar) não tem mais aquele atraso: as conversas já ficam carregadas.'
+    },
+    {
+      title: 'Ícone da call no servidor',
+      text: 'Tá na call e foi pra uma DM? O servidor da call ganha um ícone de som na barra da esquerda.'
+    },
+    {
+      title: 'Instalar como app 💻',
+      text: 'No Chrome, Edge ou Opera do PC, o botão verde de download na barra da esquerda instala o RONNCORD como app, com janela própria.'
+    },
+    {
+      since: '2026-11-19b',
+      title: 'Sala de voz nova 🔊',
+      text: 'Clique no canal de voz e a sala abre no meio da tela: um bloco por pessoa (foto ou câmera), borda verde em quem fala e botões redondos embaixo. Os blocos se ajeitam sozinhos no espaço.'
+    },
+    {
+      since: '2026-11-19b',
       title: 'Stream do jeito que você quiser',
       text: 'Com alguém transmitindo, a tela fica grande e as câmeras do lado. Arraste a **alça** do meio pra mudar o tamanho. No canto da stream: volume, mutar, **tela cheia** e **sair da stream** sem sair da call.'
     },
     {
+      since: '2026-11-19b',
       title: 'Qualidade da stream pra você',
       text: 'Internet ruim? No botão de volume da stream escolha **Original, 720p ou 480p**. Só muda pra você, quem transmite continua mandando no máximo pros outros.'
     },
     {
+      since: '2026-11-19b',
       title: 'Volume de cada pessoa',
-      text: 'Botão de som no bloco da pessoa (ou clique direito): volume de 0 a 400% e **mutar pra mim**.'
+      text: 'Clique direito no bloco da pessoa: volume de 0 a 400% e **mutar pra mim**.'
     },
     {
+      since: '2026-11-19b',
       title: 'DMs na barra da esquerda',
-      text: 'As conversas diretas aparecem embaixo dos canais, com foto e contador. Abrir uma DM não some com os canais do servidor.'
+      text: 'As conversas diretas aparecem na barra de ícones da esquerda, com foto e contador, igual no Discord.'
     },
     {
+      since: '2026-11-19b',
       title: '/aviso 📢',
       text: 'Digite **/aviso** e o texto: a mensagem sai destacada e avisa todo mundo (som e notificação). Qualquer um pode mandar.'
     },
     {
+      since: '2026-11-19b',
       title: 'Sons do Discord',
       text: 'Entrar e sair da call, mutar e menção agora têm os sons do Discord. Mensagem comum não toca: só menção, DM e /aviso (e nada no Não Perturbe).'
     },
     {
+      since: '2026-11-19b',
       title: 'Imagem do servidor',
-      text: 'Clique no nome do servidor (em cima dos canais) pra trocar o nome e a imagem. Só dono e admins mudam. Começa a funcionar assim que o servidor do RONNCORD for atualizado.'
+      text: 'Clique no nome do servidor (em cima dos canais) pra trocar o nome e a imagem. Só dono e admins mudam.'
     },
     {
+      since: '2026-11-19b',
       title: 'Online e offline mais certinho',
       text: 'Dar F5 ou abrir em duas abas não te deixa mais offline à toa, e quem tá na call aparece online.'
     },

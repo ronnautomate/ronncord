@@ -92,3 +92,7 @@
 /* botão "Instalar app" (aparece só quando o navegador deixa instalar) */
 .server-logo.install-app-btn { margin-top: auto; background: var(--bg-chat); color: var(--green); }
 .server-logo.install-app-btn + .whats-new-btn { margin-top: 0; }
+
+/* call sem tela: blocos se ajeitam sozinhos (tamanho calculado no CallStage), última fileira centralizada */
+.call-stage:not(.with-screen) { display: flex; flex-wrap: wrap; justify-content: center; align-content: safe center; gap: 12px; }
+.call-stage:not(.with-screen) > .call-tile { flex: 0 0 auto; width: var(--cam-size, 420px); max-width: 100%; }
