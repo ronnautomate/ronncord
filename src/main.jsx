@@ -25,10 +25,13 @@ import { VoiceSettingsModal } from './components/VoiceSettingsModal.jsx';
 import { NotesModal } from './components/NotesModal.jsx';
 import { MusicModal } from './components/MusicModal.jsx';
 import { WhatsNewModal } from './components/WhatsNewModal.jsx';
+import { ServerSettingsModal } from './components/ServerSettingsModal.jsx';
+import { CallStage } from './components/CallStage.jsx';
 import { NOVIDADES, isNew, markSeen } from './lib/novidades.js';
 import './style.css';
 import './discordia-extras.css';
 import { applyTheme, getSavedTheme, nameColor } from './lib/themes.js';
+import { isAvisoMessage, avisoText } from './lib/aviso.js';
 
 applyTheme(getSavedTheme());
 
@@ -117,6 +120,8 @@ function App() {
   const [localScreenStream, setLocalScreenStream] = useState(null);
   const [remoteVideos, setRemoteVideos] = useState([]);
   const [hiddenVideoIds, setHiddenVideoIds] = useState([]);
+  const [screenQualities, setScreenQualities] = useState({}); // socketId de quem transmite -> qualidade que eu pedi
+  const [hideMyScreen, setHideMyScreen] = useState(false); // escondi minha tela da sala (continua transmitindo)
   const [mutedScreenSockets, setMutedScreenSockets] = useState([]);
   const [voiceSettings, setVoiceSettings] = useState(getSavedVoiceSettings);
 
@@ -135,6 +140,13 @@ function App() {
   const activeChannelIdRef = useRef(null);
   const activeDmIdRef = useRef(null);
   const viewModeRef = useRef('server');
+  const userStatusRef = useRef('online');
+  const dmThreadsRef = useRef([]);
+
+  useEffect(() => { userStatusRef.current = user?.status || 'online'; }, [user?.status]);
+  useEffect(() => { dmThreadsRef.current = dmThreads; }, [dmThreads]);
+  // abrir canal (ou criar/entrar em servidor) volta a barra esquerda pro servidor
+  useEffect(() => { if (viewMode === 'server') setSidebarMode('server'); }, [viewMode]);
 
   useEffect(() => {
     localStorage.setItem('ronncord_music_vol', String(musicVolume));
@@ -185,6 +197,8 @@ function App() {
   const [volumeTarget, setVolumeTarget] = useState(null);
   const [userVolumes, setUserVolumes] = useState(getSavedUserVolumes);
   const socketRef = useRef(null);
+  const lastReassertRef = useRef(0);
+  const [sidebarMode, setSidebarMode] = useState('server'); // barra esquerda: 'server' (canais + DMs) | 'home' (amigos + DMs)
   const voiceManagerRef = useRef(null);
   const voiceChannelIdRef = useRef(null);
   const voiceCountRef = useRef(0);
@@ -239,6 +253,7 @@ function App() {
         }
         setFriends(frData.friends);
         setDmThreads(dmData.threads);
+        joinAllRooms(srvData.servers, dmData.threads);
 
         if (srvData.servers.length > 0) {
           const first = srvData.servers[0];
@@ -259,9 +274,45 @@ function App() {
 
     const socket = connectSocket(getToken());
     socketRef.current = socket;
+
+    // entra na sala de todos os canais de texto e DMs: assim a contagem de não lidas funciona
+    // em qualquer canal e as DMs chegam mesmo sem estar abertas (como no discordia)
+    const joinedRooms = new Set();
+    function joinAllRooms(srvList, threads) {
+      if (!socket?.connected) return;
+      for (const srv of srvList || []) {
+        for (const ch of srv.channels || []) {
+          if (ch.type === 'text' && !joinedRooms.has(`c:${ch.id}`)) {
+            joinedRooms.add(`c:${ch.id}`);
+            socket.emit('join_channel', ch.id);
+          }
+        }
+      }
+      for (const t of threads || []) {
+        if (!joinedRooms.has(`d:${t.id}`)) {
+          joinedRooms.add(`d:${t.id}`);
+          socket.emit('join_dm', t.id);
+        }
+      }
+    }
+    async function refreshDmThreads() {
+      try {
+        const d = await apiFetch('/api/dms');
+        if (!mounted) return;
+        setDmThreads(d.threads);
+        joinAllRooms([], d.threads);
+      } catch {}
+    }
+    // DM nova que outra pessoa abriu comigo aparece na lista sem precisar dar F5
+    const dmPoll = setInterval(refreshDmThreads, 45000);
+
     if (socket) {
       socket.on('connect', () => {
         socket.emit('voice:sync');
+        joinedRooms.clear();
+        Promise.all([apiFetch('/api/servers'), apiFetch('/api/dms')])
+          .then(([srv, dms]) => joinAllRooms(srv.servers, dms.threads))
+          .catch(() => {});
       });
       socket.on('message:new', msg => {
         const targetKey = msg.channel_id || msg.dm_thread_id;
@@ -270,17 +321,21 @@ function App() {
           (viewModeRef.current === 'home' && msg.dm_thread_id === activeDmIdRef.current);
 
         if (msg.author_id !== user.id) {
-          SoundFX.message();
+          const isAviso = isAvisoMessage(msg.content);
           const mentioned =
             msg.content?.toLowerCase().includes(`@${user.username?.toLowerCase()}`) ||
-            Boolean(msg.dm_thread_id);
+            Boolean(msg.dm_thread_id) ||
+            isAviso;
+          // igual ao discordia: som só pra menção, DM ou /aviso, e nunca em Não Perturbe
+          if (mentioned && userStatusRef.current !== 'dnd') SoundFX.message();
+          if (msg.dm_thread_id && !dmThreadsRef.current.some(t => t.id === msg.dm_thread_id)) refreshDmThreads();
           if (!isCurrentlyOpen || document.hidden) {
             if (targetKey) {
               setUnreadCounts(prev => ({ ...prev, [targetKey]: (prev[targetKey] || 0) + 1 }));
             }
             if (mentioned && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
-              new Notification(`${msg.author?.display_name || 'RONNCORD'}`, {
-                body: msg.content || 'Enviou um anexo'
+              new Notification(`${isAviso ? '📢 Aviso de ' : ''}${msg.author?.display_name || 'RONNCORD'}`, {
+                body: (isAviso ? avisoText(msg.content) : msg.content) || 'Enviou um anexo'
               });
             }
           }
@@ -297,6 +352,10 @@ function App() {
         setMessages(prev => prev.filter(m => m.id !== id));
       });
       socket.on('channel:created', ch => {
+        if (ch.type === 'text' && !joinedRooms.has(`c:${ch.id}`)) {
+          joinedRooms.add(`c:${ch.id}`);
+          socket.emit('join_channel', ch.id);
+        }
         setServers(prev =>
           prev.map(s => (s.id === ch.server_id ? { ...s, channels: [...s.channels, ch] } : s))
         );
@@ -305,6 +364,10 @@ function App() {
         setServers(prev =>
           prev.map(s => (s.id === serverId ? { ...s, channels: s.channels.filter(c => c.id !== channelId) } : s))
         );
+      });
+      socket.on('server:updated', srv => {
+        if (!srv?.id) return;
+        setServers(prev => prev.map(s => (s.id === srv.id ? { ...s, name: srv.name, icon_color: srv.icon_color, icon_url: srv.icon_url } : s)));
       });
       socket.on('server:member_joined', ({ serverId, member }) => {
         if (!member) return;
@@ -321,6 +384,19 @@ function App() {
         avatar_decoration, banner_color, banner_url, pronouns, bio,
         name_color, nameplate_style, clan_tag, clan_icon, badges_json, profile_effect
       }) => {
+        // servidor antigo marca a gente offline quando uma aba fecha ou no F5 (a conexão velha cai
+        // depois da nova). Se chegou "offline" pra mim e eu tô conectado, reafirmo meu status.
+        if (userId === user.id && status === 'offline' && socket.connected) {
+          const chosen = localStorage.getItem('ronncord_my_status') || 'online';
+          if (chosen !== 'offline' && Date.now() - lastReassertRef.current > 5000) {
+            lastReassertRef.current = Date.now();
+            setTimeout(() => {
+              apiFetch('/api/auth/profile', { method: 'PATCH', body: JSON.stringify({ status: chosen }) })
+                .then(d => d?.user && setUser(u => ({ ...u, status: d.user.status })))
+                .catch(() => {});
+            }, 1500);
+          }
+        }
         setServers(prev =>
           prev.map(s => ({
             ...s,
@@ -413,6 +489,7 @@ function App() {
 
     return () => {
       mounted = false;
+      clearInterval(dmPoll);
       voiceManagerRef.current?.destroy();
       voiceManagerRef.current = null;
       socket?.disconnect();
@@ -432,7 +509,7 @@ function App() {
       apiFetch(`/api/channels/${activeChannelId}/messages`)
         .then(data => setMessages(data.messages))
         .catch(console.error);
-      return () => socketRef.current?.emit('leave_channel', activeChannelId);
+      return;
     }
     if (viewMode === 'home' && activeDmId) {
       if (isDemo) {
@@ -663,7 +740,28 @@ function App() {
       method: 'PATCH',
       body: JSON.stringify(updates)
     });
+    if (updates.status) localStorage.setItem('ronncord_my_status', updates.status);
     setUser(updated);
+  }
+
+  async function handleSaveServer(updates) {
+    if (!activeServer) return;
+    if (isDemo) {
+      setServers(prev => prev.map(s => (s.id === activeServer.id ? { ...s, ...updates } : s)));
+      return;
+    }
+    try {
+      const { server } = await apiFetch(`/api/servers/${activeServer.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates)
+      });
+      setServers(prev => prev.map(s => (s.id === server.id ? { ...s, name: server.name, icon_color: server.icon_color, icon_url: server.icon_url } : s)));
+    } catch (err) {
+      if (err.message === 'Erro 404') {
+        throw new Error('O servidor do RONNCORD ainda não tem essa função: falta fazer o deploy da versão nova no Render.');
+      }
+      throw err;
+    }
   }
 
   async function handleOpenDM(targetUserId) {
@@ -747,6 +845,48 @@ function App() {
     }
   }
 
+  async function leaveVoice() {
+    SoundFX.leaveVoice();
+    voiceChannelIdRef.current = null;
+    voiceCountRef.current = 0;
+    try {
+      await voiceManagerRef.current?.leave();
+    } catch {}
+    setVoiceChannelId(null);
+    setMusicState(null);
+    setIsCameraOn(false);
+    setIsScreenSharing(false);
+    setLocalCameraStream(null);
+    setLocalScreenStream(null);
+    setRemoteVideos([]);
+    setHiddenVideoIds([]);
+    setHideMyScreen(false);
+    setViewMode(v => (v === 'voice' ? 'server' : v));
+  }
+
+  // entra na call (se ainda não estiver) e abre a sala, igual no discordia
+  async function openVoiceRoom(ch) {
+    if (isDemo) return toggleVoiceChannel(ch);
+    if (voiceChannelId !== ch.id) await toggleVoiceChannel(ch, true);
+    setSidebarMode('server');
+    setViewMode('voice');
+    setDrawer(null);
+  }
+
+  // sair / voltar a assistir uma stream sem sair da call (o som da tela muta junto)
+  function leaveStream(id) {
+    if (id === 'me') return setHideMyScreen(true);
+    setHiddenVideoIds(prev => (prev.includes(id) ? prev : [...prev, id]));
+    const v = remoteVideos.find(x => x.id === id);
+    if (v) voiceManagerRef.current?.setScreenAudioMuted(v.socketId, true);
+  }
+  function watchStream(id) {
+    if (id === 'me') return setHideMyScreen(false);
+    setHiddenVideoIds(prev => prev.filter(x => x !== id));
+    const v = remoteVideos.find(x => x.id === id);
+    if (v && !mutedScreenSockets.includes(v.socketId)) voiceManagerRef.current?.setScreenAudioMuted(v.socketId, false);
+  }
+
   async function toggleCamera() {
     if (!voiceChannelId) return;
     if (isCameraOn) {
@@ -770,6 +910,7 @@ function App() {
     if (!voiceChannelId) return;
     if (isScreenSharing) {
       await voiceManagerRef.current?.stopScreenShare();
+      setHideMyScreen(false);
       setIsScreenSharing(false);
       setLocalScreenStream(null);
       SoundFX.streamStop();
@@ -821,6 +962,56 @@ function App() {
 
   const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
 
+  // pessoa da DM: a foto e o status vêm da lista de membros dos servidores (a API de DMs só manda a cor)
+  function findPerson(userId) {
+    for (const srv of servers) {
+      const m = srv.members?.find(x => x.id === userId);
+      if (m) return m;
+    }
+    return null;
+  }
+
+  const callPeople = (voiceParticipants[voiceChannelId] || []).map(p => {
+    const isMe = p.userId === user?.id;
+    const m = findPerson(p.userId);
+    return {
+      socketId: p.socketId,
+      userId: p.userId,
+      name: p.displayName || m?.display_name || '?',
+      avatarUrl: p.avatarUrl || (isMe ? user?.avatar_url : null) || m?.avatar_url || null,
+      color: p.avatarColor || (isMe ? user?.avatar_color : null) || m?.avatar_color || '#5865F2',
+      deco: (p.avatarDecoration && p.avatarDecoration !== 'none' ? p.avatarDecoration : m?.avatar_decoration) || 'none',
+      speaking: Boolean(p.speaking || (isMe && isSpeaking)),
+      muted: isMe ? muted : Boolean(p.muted),
+      deafened: isMe ? deafened : Boolean(p.deafened),
+      isMe
+    };
+  });
+
+  function renderDmRow(t) {
+    const person = findPerson(t.peer_id);
+    const name = t.peer_display_name || t.peer_username || '?';
+    const status = person?.status || t.peer_status || 'offline';
+    return (
+      <div
+        key={t.id}
+        className={`channel dm-row ${viewMode === 'home' && activeDmId === t.id ? 'selected' : ''} ${unreadCounts[t.id] > 0 ? 'has-unread' : ''}`}
+        onClick={() => { setViewMode('home'); setActiveDmId(t.id); setDrawer(null); }}
+      >
+        <div className="avatar xs" style={{ background: person?.avatar_color || t.peer_avatar_color }}>
+          {person?.avatar_url ? (
+            <img src={resolveAssetUrl(person.avatar_url)} alt={name} className="avatar-img" />
+          ) : (
+            name[0].toUpperCase()
+          )}
+          <span className={`status-dot ${status}`} />
+        </div>
+        <span style={{ flex: 1 }}>{name}</span>
+        {unreadCounts[t.id] > 0 && <span className="unread-badge">{unreadCounts[t.id]}</span>}
+      </div>
+    );
+  }
+
   if (booting) {
     return <div className="boot-screen">Carregando RONNCORD...</div>;
   }
@@ -834,8 +1025,18 @@ function App() {
 
   const textChannels = activeServer?.channels?.filter(c => c.type === 'text') || [];
   const voiceChannels = activeServer?.channels?.filter(c => c.type === 'voice') || [];
-  const onlineMembers = activeServer?.members?.filter(m => m.status !== 'offline') || [];
-  const offlineMembers = activeServer?.members?.filter(m => m.status === 'offline') || [];
+  // quem tá numa call conta como online mesmo se a presença atrasou (igual ao discordia)
+  const inSomeCall = new Set(Object.values(voiceParticipants).flat().map(p => p.userId));
+  // meu status: o que eu escolhi (o banco do servidor antigo às vezes fica "offline" por engano)
+  const chosenStatus = localStorage.getItem('ronncord_my_status') || 'online';
+  const myStatus = chosenStatus === 'offline' ? 'offline' : (user.status && user.status !== 'offline' ? user.status : chosenStatus);
+  const withLiveStatus = (activeServer?.members || []).map(m =>
+    m.status === 'offline' && (inSomeCall.has(m.id) || m.id === user.id)
+      ? { ...m, status: m.id === user.id ? myStatus : 'online' }
+      : m
+  );
+  const onlineMembers = withLiveStatus.filter(m => m.status !== 'offline');
+  const offlineMembers = withLiveStatus.filter(m => m.status === 'offline');
 
   return (
     <div className={`app ${drawer ? `drawer-${drawer}` : ''}`}>
@@ -843,9 +1044,9 @@ function App() {
       {/* Server Rail */}
       <aside className="server-rail">
         <button
-          className={`server-logo ${viewMode === 'home' ? 'active' : ''}`}
+          className={`server-logo ${sidebarMode === 'home' ? 'active' : ''}`}
           title="Mensagens Diretas e Amigos"
-          onClick={() => { setViewMode('home'); setActiveDmId(null); }}
+          onClick={() => { setSidebarMode('home'); setViewMode('home'); setActiveDmId(null); }}
         >
           <Compass size={22} />
         </button>
@@ -855,17 +1056,22 @@ function App() {
         {servers.map(srv => (
           <button
             key={srv.id}
-            className={`server-logo ${viewMode === 'server' && activeServerId === srv.id ? 'active' : ''}`}
-            style={viewMode === 'server' && activeServerId === srv.id ? { background: srv.icon_color } : {}}
+            className={`server-logo ${sidebarMode === 'server' && activeServerId === srv.id ? 'active' : ''} ${srv.icon_url ? 'has-icon' : ''}`}
+            style={sidebarMode === 'server' && activeServerId === srv.id && !srv.icon_url ? { background: srv.icon_color } : {}}
             title={srv.name}
             onClick={() => {
+              setSidebarMode('server');
               setViewMode('server');
               setActiveServerId(srv.id);
               const firstText = srv.channels.find(c => c.type === 'text');
               setActiveChannelId(firstText?.id || null);
             }}
           >
-            {srv.name.slice(0, 2).toUpperCase()}
+            {srv.icon_url ? (
+              <img src={resolveAssetUrl(srv.icon_url)} alt={srv.name} className="server-icon-img" />
+            ) : (
+              srv.name.slice(0, 2).toUpperCase()
+            )}
           </button>
         ))}
 
@@ -888,10 +1094,17 @@ function App() {
 
       {/* Channels / DMs Sidebar */}
       <aside className="sidebar">
-        {viewMode === 'server' && activeServer ? (
+        {sidebarMode === 'server' && activeServer ? (
           <>
             <div className="workspace-title">
-              <span>{activeServer.name}</span>
+              <button
+                type="button"
+                className="workspace-name-btn"
+                title="Configurações do servidor (nome e imagem)"
+                onClick={() => setModal('server-settings')}
+              >
+                {activeServer.name}
+              </button>
               <div style={{ display: 'flex', gap: 4 }}>
                 <button
                   className="icon-btn xs"
@@ -900,7 +1113,13 @@ function App() {
                 >
                   <UserPlus size={16} />
                 </button>
-                <ChevronDown size={16} />
+                <button
+                  className="icon-btn xs"
+                  title="Configurações do servidor (nome e imagem)"
+                  onClick={() => setModal('server-settings')}
+                >
+                  <ChevronDown size={16} />
+                </button>
               </div>
             </div>
 
@@ -915,8 +1134,9 @@ function App() {
                 {textChannels.map(ch => (
                   <div
                     key={ch.id}
-                    className={`channel ${activeChannelId === ch.id ? 'selected' : ''}`}
+                    className={`channel ${viewMode === 'server' && activeChannelId === ch.id ? 'selected' : ''}`}
                     onClick={() => {
+                      setViewMode('server');
                       setActiveChannelId(ch.id);
                       setDrawer(null);
                       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
@@ -944,8 +1164,9 @@ function App() {
                   return (
                     <div key={ch.id}>
                       <div
-                        className={`channel ${connectedHere ? 'selected' : ''}`}
-                        onClick={() => toggleVoiceChannel(ch)}
+                        className={`channel ${connectedHere && viewMode === 'voice' ? 'selected' : ''} ${connectedHere ? 'connected' : ''}`}
+                        title={connectedHere ? 'Abrir a sala' : 'Entrar na call'}
+                        onClick={() => openVoiceRoom(ch)}
                       >
                         <Volume2 size={16} />
                         <span>{ch.name}</span>
@@ -1012,9 +1233,7 @@ function App() {
                                   onClick={async e => {
                                     e.stopPropagation();
                                     setHiddenVideoIds([]);
-                                    if (voiceChannelId !== ch.id) {
-                                      await toggleVoiceChannel(ch, true);
-                                    }
+                                    await openVoiceRoom(ch);
                                   }}
                                 >
                                   AO VIVO
@@ -1029,6 +1248,17 @@ function App() {
                   );
                 })}
               </div>
+
+              <div className="sidebar-section">
+                <div className="section-heading">
+                  <p className="section-label">MENSAGENS DIRETAS</p>
+                  <button className="icon-btn xs" title="Nova Mensagem Direta" onClick={() => setModal('new-dm')}>
+                    <Plus size={14} />
+                  </button>
+                </div>
+                {dmThreads.length === 0 && <p className="sidebar-empty">Nenhuma DM ainda. Clique no + ou no perfil de alguém.</p>}
+                {dmThreads.map(t => renderDmRow(t))}
+              </div>
             </div>
           </>
         ) : (
@@ -1040,7 +1270,7 @@ function App() {
               <div className="sidebar-section">
                 <div
                   className={`channel ${!activeDmId ? 'selected' : ''}`}
-                  onClick={() => { setActiveDmId(null); setDrawer(null); }}
+                  onClick={() => { setViewMode('home'); setActiveDmId(null); setDrawer(null); }}
                 >
                   <Users size={16} />
                   <span>Amigos</span>
@@ -1053,19 +1283,7 @@ function App() {
                     <Plus size={14} />
                   </button>
                 </div>
-                {dmThreads.map(t => (
-                  <div
-                    key={t.id}
-                    className={`channel ${activeDmId === t.id ? 'selected' : ''}`}
-                    onClick={() => { setActiveDmId(t.id); setDrawer(null); }}
-                  >
-                    <div className="avatar xs" style={{ background: t.peer_avatar_color }}>
-                      {(t.peer_display_name || t.peer_username)[0].toUpperCase()}
-                    </div>
-                    <span style={{ flex: 1 }}>{t.peer_display_name}</span>
-                    {unreadCounts[t.id] > 0 && <span className="unread-badge">{unreadCounts[t.id]}</span>}
-                  </div>
-                ))}
+                {dmThreads.map(t => renderDmRow(t))}
               </div>
             </div>
           </>
@@ -1139,7 +1357,15 @@ function App() {
 
         {voiceChannelId && (
           <div className="voice-status-bar">
-            <div>
+            <div
+              className="voice-status-open"
+              title="Abrir a sala"
+              onClick={() => {
+                const ch = activeServer?.channels?.find(c => c.id === voiceChannelId) ||
+                  servers.flatMap(sv => sv.channels || []).find(c => c.id === voiceChannelId);
+                if (ch) openVoiceRoom(ch);
+              }}
+            >
               <strong>
                 <Sparkles size={12} style={{ display: 'inline', marginRight: 4 }} />
                 Voz Conectada {voicePing !== null ? `• ${voicePing} ms` : ''}
@@ -1186,22 +1412,7 @@ function App() {
               <button
                 className="icon-btn danger"
                 title="Desconectar"
-                onClick={async () => {
-                  SoundFX.leaveVoice();
-                  voiceChannelIdRef.current = null;
-                  voiceCountRef.current = 0;
-                  try {
-                    await voiceManagerRef.current?.leave();
-                  } catch {}
-                  setVoiceChannelId(null);
-                  setMusicState(null);
-                  setIsCameraOn(false);
-                  setIsScreenSharing(false);
-                  setLocalCameraStream(null);
-                  setLocalScreenStream(null);
-                  setRemoteVideos([]);
-                  setHiddenVideoIds([]);
-                }}
+                onClick={leaveVoice}
               >
                 <PhoneOff size={16} />
               </button>
@@ -1217,7 +1428,7 @@ function App() {
               ) : (
                 (user.display_name || user.username)[0].toUpperCase()
               )}
-              <span className={`status-dot ${user.status}`} />
+              <span className={`status-dot ${myStatus}`} />
             </div>
             <div className="user-details">
               <strong>{user.display_name}</strong>
@@ -1246,153 +1457,58 @@ function App() {
 
       {/* Main Content */}
       <div className="main-stage">
-        {hiddenVideoIds.length > 0 && remoteVideos.some(v => hiddenVideoIds.includes(v.id)) && (
-          <div style={{ background: 'var(--bg-rail)', padding: '6px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-            <span style={{ color: 'var(--text-muted)' }}>Transmissão ocultada ({hiddenVideoIds.length})</span>
-            <button type="button" className="btn-primary xs" onClick={() => setHiddenVideoIds([])}>
-              Mostrar Transmissão
-            </button>
-          </div>
-        )}
-        {(localCameraStream || localScreenStream || remoteVideos.some(v => !hiddenVideoIds.includes(v.id))) && (
-          <div className="screen-share-stage">
-            {localCameraStream && (
-              <div className="screen-tile">
-                <video
-                  className="video-mirror"
-                  autoPlay
-                  muted
-                  playsInline
-                  ref={el => {
-                    if (el && el.srcObject !== localCameraStream) el.srcObject = localCameraStream;
-                  }}
-                />
-                <div className="screen-label">Sua Câmera • 1080p 60fps</div>
-                <button
-                  className="screen-fullscreen-btn"
-                  title="Tela Cheia"
-                  onClick={e => e.currentTarget.parentElement?.querySelector('video')?.requestFullscreen?.()}
-                >
-                  <Maximize2 size={14} />
-                </button>
-              </div>
-            )}
-            {localScreenStream && (
-              <div className="screen-tile">
-                <video
-                  autoPlay
-                  muted
-                  playsInline
-                  ref={el => {
-                    if (el && el.srcObject !== localScreenStream) el.srcObject = localScreenStream;
-                  }}
-                />
-                <div className="screen-label">Sua Tela • 1080p 60fps</div>
-                <div className="screen-tile-controls">
-                  <button
-                    className="screen-fullscreen-btn"
-                    style={{ position: 'static' }}
-                    title="Tela Cheia"
-                    onClick={e => e.currentTarget.closest('.screen-tile')?.querySelector('video')?.requestFullscreen?.()}
-                  >
-                    <Maximize2 size={14} />
-                  </button>
-                  <button
-                    className="screen-fullscreen-btn"
-                    style={{ position: 'static' }}
-                    title="Parar Transmissão"
-                    onClick={toggleScreenShare}
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-            )}
-            {remoteVideos.filter(v => !hiddenVideoIds.includes(v.id)).map(v => {
-              const isScreenMuted = mutedScreenSockets.includes(v.socketId);
-              const scrVol = isScreenMuted ? 0 : (screenVolumes[v.socketId] ?? 100);
-              return (
-              <div key={v.id} className="screen-tile">
-                <video
-                  autoPlay
-                  muted
-                  playsInline
-                  ref={el => {
-                    if (!el) return;
-                    el.muted = true;
-                    el.volume = 0;
-                    const videoOnlyStream = new MediaStream(v.stream.getVideoTracks());
-                    if (el.srcObject?.id !== v.stream.id && (!el._srcTrackId || el._srcTrackId !== v.trackId)) {
-                      el._srcTrackId = v.trackId;
-                      el.srcObject = videoOnlyStream;
-                    }
-                  }}
-                />
-                <div className="screen-label">
-                  {v.kind === 'camera' ? `Câmera de ${v.displayName}` : `Tela de ${v.displayName} • 1080p 60fps`}
-                </div>
-                <div className="screen-tile-controls">
-                  {v.kind !== 'camera' && (
-                    <div className="screen-audio-ctrl">
-                      <button
-                        className="screen-fullscreen-btn"
-                        style={{ position: 'static' }}
-                        title={isScreenMuted ? 'Ativar áudio da tela' : 'Mutar áudio da tela'}
-                        onClick={() => {
-                          const nextMuted = !isScreenMuted;
-                          voiceManagerRef.current?.setScreenAudioMuted(v.socketId, nextMuted);
-                          setMutedScreenSockets(prev =>
-                            nextMuted ? [...prev, v.socketId] : prev.filter(id => id !== v.socketId)
-                          );
-                        }}
-                      >
-                        {isScreenMuted || scrVol === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                      </button>
-                      <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        step={5}
-                        value={scrVol}
-                        title={`Volume da tela: ${scrVol}%`}
-                        className="screen-vol-slider"
-                        onChange={e => {
-                          const val = Number(e.target.value);
-                          voiceManagerRef.current?.setScreenAudioVolume(v.socketId, val);
-                          setScreenVolumes(prev => ({ ...prev, [v.socketId]: val }));
-                          if (val === 0 && !isScreenMuted) {
-                            setMutedScreenSockets(prev => [...prev, v.socketId]);
-                          } else if (val > 0 && isScreenMuted) {
-                            setMutedScreenSockets(prev => prev.filter(id => id !== v.socketId));
-                          }
-                        }}
-                      />
-                    </div>
-                  )}
-                  <button
-                    className="screen-fullscreen-btn"
-                    style={{ position: 'static' }}
-                    title="Tela Cheia"
-                    onClick={e => e.currentTarget.closest('.screen-tile')?.querySelector('video')?.requestFullscreen?.()}
-                  >
-                    <Maximize2 size={14} />
-                  </button>
-                  <button
-                    className="screen-fullscreen-btn"
-                    style={{ position: 'static' }}
-                    title="Fechar Visualização"
-                    onClick={() => setHiddenVideoIds(prev => [...prev, v.id])}
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-              );
-            })}
-          </div>
-        )}
-
-      {viewMode === 'server' && activeChannel ? (
+      {viewMode === 'voice' && voiceChannelId ? (
+        <CallStage
+          channelName={(servers.flatMap(sv => sv.channels || []).find(c => c.id === voiceChannelId) || {}).name || 'Sala'}
+          people={callPeople}
+          remoteVideos={remoteVideos}
+          localCameraStream={localCameraStream}
+          localScreenStream={localScreenStream}
+          hiddenVideoIds={hiddenVideoIds}
+          hideMyScreen={hideMyScreen}
+          userVolumes={userVolumes}
+          screenVolumes={screenVolumes}
+          mutedScreenSockets={mutedScreenSockets}
+          muted={muted}
+          deafened={deafened}
+          isCameraOn={isCameraOn}
+          isScreenSharing={isScreenSharing}
+          musicPlaying={Boolean(musicState?.isPlaying)}
+          onToggleMute={handleToggleMute}
+          onToggleDeafen={handleToggleDeafen}
+          onToggleCamera={toggleCamera}
+          onToggleScreen={toggleScreenShare}
+          onOpenMusic={() => setModal('music')}
+          onOpenSettings={() => setModal('voice-settings')}
+          onLeave={leaveVoice}
+          onLeaveStream={leaveStream}
+          onWatchStream={watchStream}
+          onUserVolume={(userId, val) => {
+            voiceManagerRef.current?.setUserVolume(userId, val);
+            setUserVolumes(prev => ({ ...prev, [userId]: val }));
+          }}
+          onScreenVolume={(socketId, val) => {
+            voiceManagerRef.current?.setScreenAudioVolume(socketId, val);
+            setScreenVolumes(prev => ({ ...prev, [socketId]: val }));
+            setMutedScreenSockets(prev => (val === 0 ? (prev.includes(socketId) ? prev : [...prev, socketId]) : prev.filter(id => id !== socketId)));
+          }}
+          onScreenMute={(socketId, isMuted) => {
+            voiceManagerRef.current?.setScreenAudioMuted(socketId, isMuted);
+            if (!isMuted) voiceManagerRef.current?.setScreenAudioVolume(socketId, screenVolumes[socketId] || 100);
+            setMutedScreenSockets(prev => (isMuted ? [...prev, socketId] : prev.filter(id => id !== socketId)));
+          }}
+          screenQualities={screenQualities}
+          onScreenQuality={(socketId, q) => {
+            voiceManagerRef.current?.requestScreenQuality(socketId, q);
+            setScreenQualities(prev => ({ ...prev, [socketId]: q }));
+          }}
+          onSelectUser={p => setSelectedProfile(findPerson(p.userId) || {
+            id: p.userId, username: (p.name || '').toLowerCase(), display_name: p.name,
+            avatar_color: p.color, avatar_url: p.avatarUrl, status: 'online'
+          })}
+          onOpenNav={() => setDrawer('nav')}
+        />
+      ) : viewMode === 'server' && activeChannel ? (
         <ChatArea
           title={activeChannel.name}
           topic={activeChannel.topic}
@@ -1464,7 +1580,7 @@ function App() {
       </div>
 
       {/* Members Sidebar */}
-      {viewMode === 'server' && showMembers && activeServer && (
+      {(viewMode === 'server' || viewMode === 'voice') && showMembers && activeServer && (
         <aside className="members">
           <h3>ONLINE — {onlineMembers.length}</h3>
           {onlineMembers.map(m => (
@@ -1598,6 +1714,15 @@ function App() {
         />
       )}
       {whatsNew && <WhatsNewModal all={whatsNew === 'all'} onClose={closeWhatsNew} />}
+      {modal === 'server-settings' && activeServer && (
+        <ServerSettingsModal
+          server={activeServer}
+          canEdit={isDemo || activeServer.my_role === 'owner' || activeServer.my_role === 'admin'}
+          onClose={() => setModal(null)}
+          onSave={handleSaveServer}
+          onUpload={handleUploadFile}
+        />
+      )}
       {modal === 'notes' && (
         <NotesModal onClose={() => setModal(null)} isDemo={isDemo} />
       )}

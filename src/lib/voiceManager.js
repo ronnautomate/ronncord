@@ -105,6 +105,32 @@ async function tuneVideoSender(sender) {
   }
 }
 
+// Qualidade da stream escolhida por quem ASSISTE (cada um pede a sua).
+// Como a call é direta entre as pessoas, quem assiste manda um pedido e quem transmite
+// ajusta só o envio pra aquela pessoa. 'source' = como sai do PC (1080p 60fps, 12 Mbps).
+export const SCREEN_QUALITIES = [
+  { id: 'source', label: 'Original', height: null, bitrate: 12_000_000, fps: 60 },
+  { id: '720', label: '720p', height: 720, bitrate: 3_500_000, fps: 30 },
+  { id: '480', label: '480p', height: 480, bitrate: 1_200_000, fps: 30 }
+];
+
+async function applyScreenQuality(sender, qualityId) {
+  if (!sender || typeof sender.getParameters !== 'function') return;
+  const q = SCREEN_QUALITIES.find(x => x.id === qualityId) || SCREEN_QUALITIES[0];
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+    const trackHeight = sender.track?.getSettings?.().height || 1080;
+    params.encodings[0].maxBitrate = q.bitrate;
+    params.encodings[0].maxFramerate = q.fps;
+    params.encodings[0].scaleResolutionDownBy = q.height ? Math.max(1, trackHeight / q.height) : 1.0;
+    params.degradationPreference = 'maintain-resolution';
+    await sender.setParameters(params);
+  } catch {
+    // navegador ignorou algum campo
+  }
+}
+
 export function getSavedUserVolumes() {
   try {
     return JSON.parse(localStorage.getItem('ronncord_user_volumes') || '{}');
@@ -131,6 +157,8 @@ export class VoiceManager {
     this.playbackCtx = null;
     this.peers = new Map(); // socketId -> { pc, audioEls, gainNodes, userId, displayName, pendingCandidates }
     this.remoteVideos = new Map(); // `${socketId}:${trackId}` -> { id, socketId, trackId, kind, displayName, stream }
+    this.screenQualityForPeer = new Map(); // quem transmite: socketId de quem assiste -> qualidade pedida
+    this.requestedScreenQuality = new Map(); // quem assiste: socketId de quem transmite -> qualidade que eu pedi
     this.trackMetaMap = new Map(); // trackId -> 'camera' | 'screen'
     this.screenAudioMuted = new Set(); // socketId set for muted screen-share audio
     this.muted = false;
@@ -348,6 +376,7 @@ export class VoiceManager {
           });
         }
         await tuneVideoSender(videoSender);
+        if (streamKind === 'screen') await this._applyScreenQualityFor(sid);
       }
       if (audioSender) {
         const aTrans = peer.pc.getTransceivers().find(t => t.sender === audioSender);
@@ -385,6 +414,24 @@ export class VoiceManager {
         }
         await this._renegotiatePeer(sid, peer.pc);
       }
+    }
+  }
+
+  // conta pra pessoa qual transceiver é câmera, tela ou som da tela
+  _announceMids(targetSocketId, pc) {
+    const camTrack = this.cameraStream?.getVideoTracks()[0];
+    const scrTrack = this.screenStream?.getVideoTracks()[0];
+    const scrAudio = this.screenStream?.getAudioTracks()[0];
+    for (const t of pc.getTransceivers()) {
+      const track = t.sender?.track;
+      if (!t.mid || !track) continue;
+      const streamKind = track === camTrack ? 'camera' : track === scrTrack ? 'screen' : track === scrAudio ? 'screen-audio' : null;
+      if (!streamKind) continue;
+      this.socket?.emit('webrtc:signal', {
+        targetSocketId,
+        channelId: this.channelId,
+        signal: { type: 'mid-meta', mid: t.mid, streamKind }
+      });
     }
   }
 
@@ -503,8 +550,38 @@ export class VoiceManager {
     }
   }
 
+  // quem assiste pede a qualidade da tela de alguém
+  requestScreenQuality(targetSocketId, qualityId) {
+    if (qualityId === 'source') this.requestedScreenQuality.delete(targetSocketId);
+    else this.requestedScreenQuality.set(targetSocketId, qualityId);
+    this.socket?.emit('webrtc:signal', {
+      targetSocketId,
+      channelId: this.channelId,
+      signal: { type: 'screen-quality', quality: qualityId }
+    });
+  }
+
+  // quem transmite: ajusta o envio da tela só pra essa pessoa
+  async _applyScreenQualityFor(socketId) {
+    const peer = this.peers.get(socketId);
+    const track = this.screenStream?.getVideoTracks()[0];
+    if (!peer || !track) return;
+    const sender = peer.pc.getSenders().find(sd => sd.track === track);
+    await applyScreenQuality(sender, this.screenQualityForPeer.get(socketId) || 'source');
+  }
+
   async _handleSignal({ fromSocketId, channelId, user, signal }) {
     if (channelId !== this.channelId) return;
+    if (signal.type === 'screen-quality') {
+      if (signal.quality === 'source') this.screenQualityForPeer.delete(fromSocketId);
+      else this.screenQualityForPeer.set(fromSocketId, String(signal.quality));
+      await this._applyScreenQualityFor(fromSocketId);
+      return;
+    }
+    if ((signal.type === 'track-meta' || signal.type === 'mid-meta') && signal.streamKind === 'screen' && this.requestedScreenQuality.has(fromSocketId)) {
+      const wanted = this.requestedScreenQuality.get(fromSocketId);
+      setTimeout(() => this.requestScreenQuality(fromSocketId, wanted), 1500);
+    }
     if (signal.type === 'track-meta') {
       this.trackMetaMap.set(signal.trackId, signal.streamKind);
       const existing = this.remoteVideos.get(`${fromSocketId}:${signal.trackId}`);
@@ -558,6 +635,15 @@ export class VoiceManager {
         channelId: this.channelId,
         signal: { type: 'answer', sdp: answer.sdp }
       });
+      // quem entra depois manda a oferta só com áudio: minha câmera/tela já ligadas ficam de fora
+      // dessa resposta. Aí eu renegocio pra pessoa nova receber o que eu já estava transmitindo.
+      const pendingVideo = pc.getTransceivers().some(t => !t.mid && t.sender?.track);
+      if (pendingVideo) {
+        setTimeout(async () => {
+          await this._renegotiatePeer(fromSocketId, pc);
+          setTimeout(() => this._announceMids(fromSocketId, pc), 800);
+        }, 300);
+      }
     } else if (signal.type === 'answer') {
       if (pc.signalingState === 'have-local-offer') {
         await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
@@ -620,6 +706,7 @@ export class VoiceManager {
         });
         const sender = pc.addTrack(track, this.screenStream);
         await tuneVideoSender(sender);
+        await this._applyScreenQualityFor(targetSocketId);
       }
       if (audioTrack) {
         pc.addTrack(audioTrack, this.screenStream);
@@ -787,6 +874,8 @@ export class VoiceManager {
       peer.screenAudioEls.clear();
     }
     this.peers.delete(socketId);
+    this.screenQualityForPeer.delete(socketId);
+    this.requestedScreenQuality.delete(socketId);
     let changed = false;
     for (const [key, val] of this.remoteVideos.entries()) {
       if (val.socketId === socketId) {

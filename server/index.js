@@ -156,6 +156,12 @@ async function hydrateMessage(msg) {
   };
 }
 
+// presença de verdade: online só quem tem conexão aberta agora; o banco guarda o status escolhido
+const onlineSockets = new Map(); // userId -> Set(socketId)
+function livePresence(userId, chosen) {
+  return onlineSockets.get(userId)?.size ? (chosen || 'online') : 'offline';
+}
+
 async function getFullServersForUser(userId) {
   const servers = await db.all(
     `SELECT s.*, sm.role as my_role
@@ -180,7 +186,7 @@ async function getFullServersForUser(userId) {
        ORDER BY sm.role DESC, u.display_name ASC`,
       s.id
     );
-    result.push({ ...s, channels, members });
+    result.push({ ...s, channels, members: members.map(m => ({ ...m, status: livePresence(m.id, m.status) })) });
   }
   return result;
 }
@@ -563,6 +569,32 @@ app.post('/api/servers/import-discord', authMiddleware, async (req, res) => {
   }
 });
 
+// Configurações do servidor: nome e imagem (só dono ou admin)
+app.patch('/api/servers/:serverId', authMiddleware, async (req, res) => {
+  const { serverId } = req.params;
+  const member = await db.get('SELECT role FROM server_members WHERE server_id = ? AND user_id = ?', serverId, req.user.id);
+  if (!member || (member.role !== 'owner' && member.role !== 'admin')) {
+    return res.status(403).json({ error: 'Só o dono ou admins mudam o servidor' });
+  }
+  const srv = await db.get('SELECT * FROM servers WHERE id = ?', serverId);
+  if (!srv) return res.status(404).json({ error: 'Servidor não encontrado' });
+
+  const body = req.body || {};
+  const name = body.name !== undefined ? String(body.name).trim().slice(0, 60) : srv.name;
+  if (!name) return res.status(400).json({ error: 'Nome do servidor obrigatório' });
+  let iconUrl = srv.icon_url || null;
+  if (body.icon_url !== undefined) {
+    iconUrl = body.icon_url ? sanitizeAssetUrl(body.icon_url) : null;
+    if (body.icon_url && !iconUrl) return res.status(400).json({ error: 'Imagem inválida' });
+  }
+  const iconColor = /^#[0-9a-fA-F]{6}$/.test(String(body.icon_color || '')) ? body.icon_color : srv.icon_color;
+
+  await db.run('UPDATE servers SET name = ?, icon_url = ?, icon_color = ? WHERE id = ?', name, iconUrl, iconColor, serverId);
+  const updated = { id: serverId, name, icon_url: iconUrl, icon_color: iconColor };
+  io.to(`server:${serverId}`).emit('server:updated', updated);
+  res.json({ server: updated });
+});
+
 app.post('/api/servers/join/:inviteCode', authMiddleware, async (req, res) => {
   const code = String(req.params.inviteCode || '').trim();
   const srv = await db.get('SELECT * FROM servers WHERE invite_code = ?', code);
@@ -734,7 +766,7 @@ app.get('/api/friends', authMiddleware, async (req, res) => {
      WHERE f.requester_id = ? OR f.addressee_id = ?`,
     req.user.id, req.user.id, req.user.id
   );
-  res.json({ friends: rows });
+  res.json({ friends: rows.map(r => ({ ...r, user_status: livePresence(r.friend_id, r.user_status) })) });
 });
 
 app.post('/api/friends/request', authMiddleware, async (req, res) => {
@@ -791,7 +823,7 @@ app.get('/api/dms', authMiddleware, async (req, res) => {
      ORDER BY t.created_at DESC`,
     req.user.id, req.user.id, req.user.id
   );
-  res.json({ threads });
+  res.json({ threads: threads.map(t => ({ ...t, peer_status: livePresence(t.peer_id, t.peer_status) })) });
 });
 
 app.post('/api/dms', authMiddleware, async (req, res) => {
@@ -849,7 +881,9 @@ app.post('/api/dms/:threadId/messages', authMiddleware, async (req, res) => {
     msgId, req.params.threadId, req.user.id, encryptMessageText(trimmed), JSON.stringify(safeAtts), validReplyId, Date.now()
   );
   const hydrated = await hydrateMessage(await db.get('SELECT * FROM messages WHERE id = ?', msgId));
-  io.to(`dm:${req.params.threadId}`).emit('message:new', hydrated);
+  // manda também pra sala pessoal dos dois: a DM chega mesmo pra quem não está com ela aberta
+  const thread = await db.get('SELECT user1_id, user2_id FROM dm_threads WHERE id = ?', req.params.threadId);
+  io.to([`dm:${req.params.threadId}`, `user:${thread.user1_id}`, `user:${thread.user2_id}`]).emit('message:new', hydrated);
   res.status(201).json({ message: hydrated });
 });
 
@@ -946,6 +980,8 @@ io.use(async (socket, next) => {
 io.on('connection', async (socket) => {
   const userId = socket.user.id;
   socket.join(`user:${userId}`);
+  if (!onlineSockets.has(userId)) onlineSockets.set(userId, new Set());
+  onlineSockets.get(userId).add(socket.id);
 
   const myServers = await db.all('SELECT server_id FROM server_members WHERE user_id = ?', userId);
   const myServerIds = new Set(myServers.map(s => s.server_id));
@@ -1139,8 +1175,15 @@ io.on('connection', async (socket) => {
         io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
       }
     }
-    await db.run("UPDATE users SET status = 'offline' WHERE id = ?", userId);
-    io.emit('presence:update', { userId, status: 'offline' });
+    // só fica offline quando fecha a ÚLTIMA aba/aparelho; o status escolhido (Ausente, Não Perturbe) não é apagado.
+    // espera uns segundos: no F5 a conexão nova chega logo depois e a pessoa nem pisca offline.
+    const mine = onlineSockets.get(userId);
+    mine?.delete(socket.id);
+    setTimeout(() => {
+      if (onlineSockets.get(userId)?.size) return;
+      onlineSockets.delete(userId);
+      io.emit('presence:update', { userId, status: 'offline' });
+    }, 8000);
   });
 });
 

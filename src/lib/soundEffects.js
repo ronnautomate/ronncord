@@ -66,7 +66,48 @@ function playChime(notes, { type = 'sine', volume = 0.16, filterFreq = 2600 } = 
   }
 }
 
-export const SoundFX = {
+// Sons do Discord (os mesmos do discordia): ficam em public/sounds/ e baixam uma vez só.
+// Se o arquivo falhar, toca o bipe sintetizado de antes.
+const SOUND_FILES = { entrar: 'entrar', sair: 'sair', mencao: 'mencao', mutar: 'mutar' };
+const soundBuffers = {};
+
+function loadSound(name) {
+  const ctx = getCtx();
+  if (!ctx) return Promise.reject(new Error('sem AudioContext'));
+  if (!soundBuffers[name]) {
+    const base = import.meta.env.BASE_URL || '/';
+    soundBuffers[name] = fetch(`${base}sounds/${SOUND_FILES[name]}.mp3`)
+      .then(r => {
+        if (!r.ok) throw new Error(`som ${name}: ${r.status}`);
+        return r.arrayBuffer();
+      })
+      .then(buf => ctx.decodeAudioData(buf))
+      .catch(err => {
+        delete soundBuffers[name];
+        throw err;
+      });
+  }
+  return soundBuffers[name];
+}
+
+function playFile(name, fallback, volume = 0.6) {
+  if (!isSoundsEnabled()) return;
+  const ctx = getCtx();
+  if (!ctx) return;
+  loadSound(name)
+    .then(buffer => {
+      const src = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      src.buffer = buffer;
+      gain.gain.value = volume;
+      src.connect(gain).connect(ctx.destination);
+      src.start();
+    })
+    .catch(() => fallback?.());
+}
+
+// sons da versão sintetizada (usados como reserva se o mp3 não carregar)
+const Chimes = {
   // Entrou na call (G4 -> D5)
   joinVoice() {
     playChime([
@@ -143,4 +184,18 @@ export const SoundFX = {
       { freq: 783.99, dur: 0.075, gap: 0 }
     ], { type: 'sine', volume: 0.09, filterFreq: 2600 });
   }
+};
+
+export const SoundFX = {
+  ...Chimes,
+  joinVoice: () => playFile('entrar', Chimes.joinVoice),
+  leaveVoice: () => playFile('sair', Chimes.leaveVoice),
+  userJoined: () => playFile('entrar', Chimes.userJoined),
+  userLeft: () => playFile('sair', Chimes.userLeft),
+  mute: () => playFile('mutar', Chimes.mute),
+  unmute: () => playFile('mutar', Chimes.unmute),
+  deafen: () => playFile('mutar', Chimes.deafen),
+  undeafen: () => playFile('mutar', Chimes.undeafen),
+  // menção, DM ou /aviso (igual ao discordia: mensagem comum não toca)
+  message: () => playFile('mencao', Chimes.message)
 };
