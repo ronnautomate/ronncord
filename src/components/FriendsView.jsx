@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Users, UserPlus, MessageSquare, Check, X } from 'lucide-react';
+import { Users, UserPlus, MessageSquare, Check, X, Menu } from 'lucide-react';
 
-export function FriendsView({ friends, currentUserId, onAddFriend, onAcceptFriend, onRemoveFriend, onOpenDM }) {
+export function FriendsView({ friends, currentUserId, onAddFriend, onAcceptFriend, onRemoveFriend, onOpenDM, onOpenNav }) {
   const [tab, setTab] = useState('online');
   const [usernameInput, setUsernameInput] = useState('');
   const [feedback, setFeedback] = useState('');
@@ -28,6 +28,11 @@ export function FriendsView({ friends, currentUserId, onAddFriend, onAcceptFrien
     <main className="chat-area">
       <header className="chat-header">
         <div className="chat-header-title">
+          {onOpenNav && (
+            <button type="button" className="icon-btn mobile-nav-btn" title="Servidores e canais" onClick={onOpenNav}>
+              <Menu size={20} />
+            </button>
+          )}
           <Users size={20} className="header-icon" />
           <strong>Amigos</strong>
           <div className="friends-tabs">
