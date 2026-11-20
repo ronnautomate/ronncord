@@ -237,7 +237,79 @@ function GeoRound({ act, g }) {
         viewer.on('error', () => { if (vivo && reserva) usar(reserva, null); });
       };
       const alta = !celular() && l.hd;
-      usar(alta ? l.hd : l.img, alta ? l.img : null);
+      const pxId = /panoramax\./.test(l.img || '') ? l.id : null;
+      if (!pxId) usar(alta ? l.hd : l.img, alta ? l.img : null);
+      else {
+        // ===== andar pela rua (modo "Moving" do GeoGuessr) =====
+        // As fotos do Panoramax vêm em sequência: busca a foto da frente e a de trás e põe setas no chão.
+        // Os pontos continuam contando a partir do lugar onde a rodada começou.
+        const API = 'https://panoramax.openstreetmap.fr/api/search?ids=';
+        const cache = new Map();
+        const info = async id => {
+          if (cache.has(id)) return cache.get(id);
+          const r = await fetch(API + id, { signal: AbortSignal.timeout(8000) });
+          const f = (await r.json()).features?.[0];
+          if (!f) throw new Error('sem foto');
+          const out = {
+            id, sd: f.assets?.sd?.href, hd: f.assets?.hd?.href, az: Number(f.properties?.['view:azimuth']) || 0,
+            lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
+            viz: (f.links || []).filter(x => (x.rel === 'next' || x.rel === 'prev') && x.geometry)
+              .map(x => ({ id: x.href.split('/').pop(), lat: x.geometry.coordinates[1], lon: x.geometry.coordinates[0] }))
+          };
+          cache.set(id, out);
+          return out;
+        };
+        const rumo = (a, b) => {
+          const r = Math.PI / 180, y = Math.sin((b.lon - a.lon) * r) * Math.cos(b.lat * r);
+          const x = Math.cos(a.lat * r) * Math.sin(b.lat * r) - Math.sin(a.lat * r) * Math.cos(b.lat * r) * Math.cos((b.lon - a.lon) * r);
+          return (Math.atan2(y, x) / r + 360) % 360;
+        };
+        const norm = v => ((v + 540) % 360) - 180;
+        const setas = cur => cur.viz.map(v => ({
+          pitch: -12, yaw: norm(rumo(cur, v) - cur.az), type: 'custom', cssClass: 'geo-seta',
+          createTooltipFunc: div => { div.innerHTML = '<span>▲</span>'; div.title = 'Andar pra cá'; },
+          clickHandlerFunc: () => andar(v.id)
+        }));
+        const cena = (cur, url) => ({
+          type: 'equirectangular', panorama: url, hfov: 100, hotSpots: setas(cur), crossOrigin: 'anonymous'
+        });
+        let atual = null, andando = false;
+        const andar = async id => {
+          if (andando || !viewer) return;
+          andando = true;
+          try {
+            const prox = await info(id);
+            if (!vivo) return;
+            const rumoAgora = norm(viewer.getYaw() + atual.az);
+            if (!viewer.getConfig().scenes?.[id]) viewer.addScene(id, cena(prox, prox.sd || prox.hd));
+            viewer.loadScene(id, viewer.getPitch(), norm(rumoAgora - prox.az), viewer.getHfov());
+            atual = prox;
+            voltar.hidden = id === inicioId;
+          } catch { /* a foto vizinha não abriu: fica onde está */ }
+          andando = false;
+        };
+        const inicioId = pxId;
+        const voltar = document.createElement('button');
+        voltar.type = 'button';
+        voltar.className = 'geo-voltar';
+        voltar.textContent = '↩ Voltar ao começo';
+        voltar.hidden = true;
+        voltar.onclick = () => andar(inicioId);
+        info(pxId).then(cur => {
+          if (!vivo) return;
+          atual = cur;
+          try { viewer?.destroy(); } catch { /* já foi */ }
+          caixa.innerHTML = '';
+          const url0 = alta && cur.hd ? cur.hd : (cur.sd || l.img);
+          viewer = window.pannellum.viewer(caixa, {
+            default: { firstScene: pxId, autoLoad: true, showFullscreenCtrl: false, compass: false, keyboardZoom: false, sceneFadeDuration: 400,
+              strings: { loadingLabel: 'Carregando a foto...', unknownError: 'A foto não abriu 😕', bylineLabel: '' } },
+            scenes: { [pxId]: { ...cena(cur, url0), yaw: Math.random() * 360 - 180 } }
+          });
+          viewer.on('error', () => { if (vivo && url0 !== cur.sd && cur.sd) { try { viewer.destroy(); } catch { /* */ } usar(cur.sd, null); } });
+          caixa.appendChild(voltar);
+        }).catch(() => { if (vivo) usar(alta ? l.hd : l.img, alta ? l.img : null); });
+      }
     } else {
       caixa.innerHTML = '';
       const plana = document.createElement('div');
