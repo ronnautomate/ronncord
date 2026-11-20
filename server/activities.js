@@ -123,17 +123,27 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
 
   // ---------------- fotos extras do GeoGuessr (mandadas pelo pessoal, guardadas no próprio servidor) ----------------
   // Ficam numa tabela e entram no sorteio junto com a lista fixa, sem precisar subir código.
+  // cada foto extra pode ter vizinhas (sequência pra andar): viz = [{ id, lat, lon }], az = pra onde o centro da foto aponta.
+  // Só as que têm inicio = 1 entram no sorteio; as outras são passos que a gente alcança andando.
+  const EXTRA_NOS = new Map();
   function addExtra(r) {
-    const l = { id: r.id, lat: r.lat, lon: r.lon, img: r.img, p360: Boolean(r.p360), cc: r.cc, perto: r.perto || '', extra: true };
-    if (GEO_POR_ID.has(l.id)) return;
+    let viz = [];
+    try { viz = typeof r.viz === 'string' ? JSON.parse(r.viz || '[]') : (r.viz || []); } catch { viz = []; }
+    const l = { id: r.id, lat: r.lat, lon: r.lon, img: r.img, p360: Boolean(r.p360), cc: r.cc, perto: r.perto || '', extra: true, az: Number(r.az) || 0, viz, anda: viz.length > 0 };
+    EXTRA_NOS.set(l.id, l);
+    if (r.inicio === 0 || r.inicio === false || GEO_POR_ID.has(l.id)) return;
     GEO.locais.push(l);
     GEO_POR_ID.set(l.id, l);
   }
   const extrasProntos = (async () => {
     await db.exec(`CREATE TABLE IF NOT EXISTS activity_geo_extra (
       id TEXT PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL, img TEXT NOT NULL, p360 INTEGER NOT NULL DEFAULT 1,
-      cc TEXT NOT NULL, perto TEXT, added_by TEXT, created_at INTEGER NOT NULL
+      cc TEXT NOT NULL, perto TEXT, added_by TEXT, created_at INTEGER NOT NULL,
+      az REAL DEFAULT 0, viz TEXT DEFAULT '[]', inicio INTEGER DEFAULT 1
     )`);
+    for (const col of ["az REAL DEFAULT 0", "viz TEXT DEFAULT '[]'", "inicio INTEGER DEFAULT 1"]) {
+      try { await db.exec(`ALTER TABLE activity_geo_extra ADD COLUMN ${col}`); } catch { /* já tem */ }
+    }
     for (const r of await db.all('SELECT * FROM activity_geo_extra')) addExtra(r);
   })().catch(err => console.error('[ATIVIDADES] fotos extras do geo:', err));
 
@@ -151,15 +161,29 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
     if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return res.status(400).json({ error: 'Coordenada inválida' });
     if (!/^[A-Z]{2}$/.test(cc)) return res.status(400).json({ error: 'País inválido (código de 2 letras)' });
     if (!/^https:\/\//.test(img)) return res.status(400).json({ error: 'Imagem inválida' });
-    const r = { id: crypto.randomUUID(), lat, lon, img, p360: b.p360 === false ? 0 : 1, cc, perto: String(b.perto || '').slice(0, 80), added_by: req.user.id, created_at: Date.now() };
-    await db.run('INSERT INTO activity_geo_extra (id, lat, lon, img, p360, cc, perto, added_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', r.id, r.lat, r.lon, r.img, r.p360, r.cc, r.perto, r.added_by, r.created_at);
+    const viz = Array.isArray(b.viz) ? b.viz.slice(0, 8).map(v => ({ id: String(v.id), lat: Number(v.lat), lon: Number(v.lon) })).filter(v => v.id && Number.isFinite(v.lat) && Number.isFinite(v.lon)) : [];
+    const id = /^[0-9a-f-]{36}$/i.test(String(b.id || '')) ? String(b.id) : crypto.randomUUID();
+    const r = { id, lat, lon, img, p360: b.p360 === false ? 0 : 1, cc, perto: String(b.perto || '').slice(0, 80), added_by: req.user.id, created_at: Date.now(),
+      az: Number(b.az) || 0, viz: JSON.stringify(viz), inicio: b.inicio === false ? 0 : 1 };
+    await db.run('DELETE FROM activity_geo_extra WHERE id = ?', r.id);
+    await db.run('INSERT INTO activity_geo_extra (id, lat, lon, img, p360, cc, perto, added_by, created_at, az, viz, inicio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      r.id, r.lat, r.lon, r.img, r.p360, r.cc, r.perto, r.added_by, r.created_at, r.az, r.viz, r.inicio);
     addExtra(r);
     res.status(201).json({ ok: true, id: r.id, total: GEO.locais.length });
+  });
+
+  // um passo da sequência (quem está andando na foto pede a próxima)
+  app.get('/api/activities/geo/no/:id', authMiddleware, async (req, res) => {
+    await extrasProntos;
+    const l = EXTRA_NOS.get(req.params.id);
+    if (!l) return res.status(404).json({ error: 'Foto não encontrada' });
+    res.json({ id: l.id, img: l.img, az: l.az, lat: l.lat, lon: l.lon, viz: l.viz });
   });
 
   app.delete('/api/activities/geo/extras/:id', authMiddleware, async (req, res) => {
     await extrasProntos;
     await db.run('DELETE FROM activity_geo_extra WHERE id = ?', req.params.id);
+    EXTRA_NOS.delete(req.params.id);
     const i = GEO.locais.findIndex(l => l.id === req.params.id && l.extra);
     if (i >= 0) { GEO.locais.splice(i, 1); GEO_POR_ID.delete(req.params.id); }
     res.json({ ok: true });
@@ -238,7 +262,8 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
     g.rodada++;
     g.fase = 'chutando';
     const l = GEO_POR_ID.get(g.priv.locais[g.rodada]);
-    g.local = { id: l.id, img: l.img, hd: l.hd || null, p360: !!l.p360 }; // sem lat/lon: a resposta só vem no resultado
+    // sem lat/lon: a resposta só vem no resultado. fonte diz de onde vêm os passos pra andar (Panoramax ou o nosso servidor)
+    g.local = { id: l.id, img: l.img, hd: l.hd || null, p360: !!l.p360, fonte: l.extra ? 'extra' : 'px', anda: l.extra ? !!l.anda : !!l.anda, az: l.extra ? (l.az || 0) : undefined };
     g.chutaram = [];
     g.resultado = null;
     g.priv.chutes = {};
