@@ -4,7 +4,7 @@ function getCtx() {
   if (typeof window === 'undefined') return null;
   if (!audioCtx) {
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (Ctx) audioCtx = new Ctx();
+    if (Ctx) { audioCtx = new Ctx(); applyOutputDevice(audioCtx); }
   }
   if (audioCtx && audioCtx.state === 'suspended') {
     audioCtx.resume().catch(() => {});
@@ -20,8 +20,25 @@ export function setSoundsEnabled(enabled) {
   localStorage.setItem('ronncord_sounds', enabled ? 'on' : 'off');
 }
 
+// volume dos efeitos (0-100), escolhido em Configurações > Sons
+export function getSoundVolume() {
+  const v = Number(localStorage.getItem('ronncord_sound_volume'));
+  return Number.isFinite(v) && localStorage.getItem('ronncord_sound_volume') !== null ? Math.max(0, Math.min(100, v)) : 100;
+}
+
+export function setSoundVolume(v) {
+  localStorage.setItem('ronncord_sound_volume', String(Math.max(0, Math.min(100, Number(v)))));
+}
+
+// saída de áudio escolhida (Configurações > Voz e vídeo); Chrome 110+ aceita no AudioContext
+export function applyOutputDevice(ctx) {
+  const id = localStorage.getItem('ronncord_output_device');
+  if (ctx?.setSinkId && id) ctx.setSinkId(id === 'default' ? '' : id).catch(() => {});
+}
+
 function playChime(notes, { type = 'sine', volume = 0.16, filterFreq = 2600 } = {}) {
   if (!isSoundsEnabled()) return;
+  volume *= getSoundVolume() / 100;
   const ctx = getCtx();
   if (!ctx) return;
 
@@ -92,6 +109,7 @@ function loadSound(name) {
 
 function playFile(name, fallback, volume = 0.6) {
   if (!isSoundsEnabled()) return;
+  volume *= getSoundVolume() / 100;
   const ctx = getCtx();
   if (!ctx) return;
   loadSound(name)
@@ -199,7 +217,7 @@ function screenShareBeeps() {
     osc.frequency.value = freq;
     const t = now + i * 0.09;
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.18, t + 0.01);
+    g.gain.linearRampToValueAtTime(0.25 * getSoundVolume() / 100, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
     osc.connect(g).connect(ctx.destination);
     osc.start(t);
@@ -222,3 +240,7 @@ export const SoundFX = {
   // menção, DM ou /aviso (igual ao discordia: mensagem comum não toca)
   message: () => playFile('mencao', Chimes.message)
 };
+
+export function refreshOutputDevice() {
+  applyOutputDevice(audioCtx);
+}

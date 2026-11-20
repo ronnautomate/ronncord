@@ -3,38 +3,86 @@
 // (a versão em que entraram). Imagens ficam em public/novidades/<versão>/.
 // Versões comparam como texto: "2026-11-19" < "2026-11-19b" < "2026-11-20".
 export const NOVIDADES = {
-  version: '2026-11-19c',
-  date: '19 de novembro de 2026',
+  version: '2026-11-20',
+  date: '20 de novembro de 2026',
   items: [
     {
+      title: 'Jogos na call 🚀',
+      text: 'Botão de **foguete** na barra da call: **GeoGuessr** e **Truco** (paulista ou mineiro, 1x1, 2x2 ou de 3). Quem inicia chama, os outros recebem o convite e entram se quiserem.'
+    },
+    {
+      title: 'Quem tá assistindo 👁️',
+      text: 'Na stream aparece quem está assistindo, e do lado do AO VIVO fica o número.'
+    },
+    {
+      title: 'Stream grande em cima',
+      text: 'Com alguém transmitindo, a tela fica grande em cima e o pessoal numa fileira embaixo. Arraste a divisa pra fileira ficar maior ou menor.'
+    },
+    {
+      title: 'Soundboard 🔊',
+      text: 'Botão de ondinha na barra da call: buzina, ba dum tss, aplausos e mais, tocando pra todo mundo. Dá pra adicionar sons seus.'
+    },
+    {
+      title: 'Enquete 📊',
+      text: 'Botão de gráfico do lado do GIF, ou digite **/poll**. Cada um vota uma vez e dá pra trocar o voto.'
+    },
+    {
+      title: 'Figurinhas',
+      text: 'No botão **GIF**, a aba **Figurinhas** busca figurinhas animadas.'
+    },
+    {
+      title: 'Configurações novas ⚙️',
+      text: 'Tudo numa tela só, igual o Discord: conta, perfil (com prévia ao vivo), clã, tema, voz e vídeo (saída de áudio e câmera), notificações e volume dos sons.'
+    },
+    {
+      title: 'Amigos de verdade',
+      text: 'Pedido de amizade chega na hora, com aviso no ícone de início. Dá pra adicionar clicando no perfil da pessoa.'
+    },
+    {
+      title: 'Notificação com o app fechado',
+      text: 'Ligue em Configurações > Notificações: DM, menção e /aviso chegam mesmo com o RONNCORD fechado.'
+    },
+    {
+      title: 'Call mais firme',
+      text: 'Se a internet piscar, você volta pra call sozinho e não fica "congelado" (mutado e falando) na lista dos outros.'
+    },
+    {
+      since: '2026-11-19c',
       title: 'Cartão de perfil 🪪',
       text: 'Clicar em alguém (call, membros ou chat) abre um cartão pequeno do lado, igual no Discord, com bio, cargo e um campo pra mandar mensagem na hora.'
     },
     {
+      since: '2026-11-19c',
       title: 'Compartilhar tela com som',
       text: 'A tela vai sempre com o som ligado, e **as vozes da call não vão junto** (ninguém escuta a própria voz de volta). A aba do RONNCORD nem aparece mais na lista.'
     },
     {
+      since: '2026-11-19c',
       title: 'Call que se ajeita sozinha',
       text: 'Sem tela compartilhada, os blocos crescem e se organizam sozinhos conforme o tamanho da janela e quem entra ou sai.'
     },
     {
+      since: '2026-11-19c',
       title: 'Colar e arrastar imagem',
       text: '**Ctrl+V** cola print direto no chat, e dá pra arrastar arquivos pra conversa.'
     },
     {
+      since: '2026-11-19c',
       title: 'Player de áudio novo',
       text: 'Áudios e mensagens de voz ganharam um player escuro com barra pra pular e o tempo do lado.'
     },
     {
+      since: '2026-11-19c',
       title: 'Troca de chat instantânea',
       text: 'Ir de DM pra canal (e voltar) não tem mais aquele atraso: as conversas já ficam carregadas.'
     },
     {
+      since: '2026-11-19c',
       title: 'Ícone da call no servidor',
       text: 'Tá na call e foi pra uma DM? O servidor da call ganha um ícone de som na barra da esquerda.'
     },
     {
+      since: '2026-11-19c',
       title: 'Instalar como app 💻',
       text: 'No Chrome, Edge ou Opera do PC, o botão verde de download na barra da esquerda instala o RONNCORD como app, com janela própria.'
     },
