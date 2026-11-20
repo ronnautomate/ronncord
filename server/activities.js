@@ -121,6 +121,50 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
     CREATE INDEX IF NOT EXISTS idx_activity_geo_scores_srv ON activity_geo_scores (server_id, created_at)
   `).catch(err => console.error('[ATIVIDADES] não criou a tabela do ranking:', err));
 
+  // ---------------- fotos extras do GeoGuessr (mandadas pelo pessoal, guardadas no próprio servidor) ----------------
+  // Ficam numa tabela e entram no sorteio junto com a lista fixa, sem precisar subir código.
+  function addExtra(r) {
+    const l = { id: r.id, lat: r.lat, lon: r.lon, img: r.img, p360: Boolean(r.p360), cc: r.cc, perto: r.perto || '', extra: true };
+    if (GEO_POR_ID.has(l.id)) return;
+    GEO.locais.push(l);
+    GEO_POR_ID.set(l.id, l);
+  }
+  const extrasProntos = (async () => {
+    await db.exec(`CREATE TABLE IF NOT EXISTS activity_geo_extra (
+      id TEXT PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL, img TEXT NOT NULL, p360 INTEGER NOT NULL DEFAULT 1,
+      cc TEXT NOT NULL, perto TEXT, added_by TEXT, created_at INTEGER NOT NULL
+    )`);
+    for (const r of await db.all('SELECT * FROM activity_geo_extra')) addExtra(r);
+  })().catch(err => console.error('[ATIVIDADES] fotos extras do geo:', err));
+
+  app.get('/api/activities/geo/extras', authMiddleware, async (_req, res) => {
+    await extrasProntos;
+    res.json({ total: GEO.locais.length, extras: GEO.locais.filter(l => l.extra) });
+  });
+
+  app.post('/api/activities/geo/extras', authMiddleware, async (req, res) => {
+    await extrasProntos;
+    const b = req.body || {};
+    const lat = Number(b.lat), lon = Number(b.lon);
+    const cc = String(b.cc || '').toUpperCase();
+    const img = String(b.img || '');
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return res.status(400).json({ error: 'Coordenada inválida' });
+    if (!/^[A-Z]{2}$/.test(cc)) return res.status(400).json({ error: 'País inválido (código de 2 letras)' });
+    if (!/^https:\/\//.test(img)) return res.status(400).json({ error: 'Imagem inválida' });
+    const r = { id: crypto.randomUUID(), lat, lon, img, p360: b.p360 === false ? 0 : 1, cc, perto: String(b.perto || '').slice(0, 80), added_by: req.user.id, created_at: Date.now() };
+    await db.run('INSERT INTO activity_geo_extra (id, lat, lon, img, p360, cc, perto, added_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', r.id, r.lat, r.lon, r.img, r.p360, r.cc, r.perto, r.added_by, r.created_at);
+    addExtra(r);
+    res.status(201).json({ ok: true, id: r.id, total: GEO.locais.length });
+  });
+
+  app.delete('/api/activities/geo/extras/:id', authMiddleware, async (req, res) => {
+    await extrasProntos;
+    await db.run('DELETE FROM activity_geo_extra WHERE id = ?', req.params.id);
+    const i = GEO.locais.findIndex(l => l.id === req.params.id && l.extra);
+    if (i >= 0) { GEO.locais.splice(i, 1); GEO_POR_ID.delete(req.params.id); }
+    res.json({ ok: true });
+  });
+
   // ---------------- quem está na call ----------------
   function presentes(channelId) {
     const room = voiceRooms.get(channelId);
