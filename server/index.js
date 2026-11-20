@@ -28,10 +28,22 @@ function resolveJwtSecret() {
   return generated;
 }
 const JWT_SECRET = resolveJwtSecret();
-const MSG_ENC_KEY = crypto
-  .createHash('sha256')
-  .update('ronncord-msg-v1:' + (process.env.MESSAGE_ENCRYPTION_KEY || JWT_SECRET))
-  .digest();
+function deriveMsgKey(secret) {
+  return crypto
+    .createHash('sha256')
+    .update('ronncord-msg-v1:' + secret)
+    .digest();
+}
+const MSG_ENC_KEY = deriveMsgKey(process.env.MESSAGE_ENCRYPTION_KEY || JWT_SECRET);
+// Optional comma-separated old keys (MESSAGE_ENCRYPTION_KEY or JWT_SECRET) to allow zero-downtime key rotation
+const MSG_DEC_KEYS = [
+  MSG_ENC_KEY,
+  ...String(process.env.PREVIOUS_MESSAGE_ENCRYPTION_KEYS || '')
+    .split(',')
+    .map(k => k.trim())
+    .filter(Boolean)
+    .map(deriveMsgKey)
+];
 
 function encryptMessageText(plain) {
   if (!plain) return '';
@@ -46,15 +58,19 @@ function decryptMessageText(stored) {
   if (!stored) return '';
   const s = String(stored);
   if (!s.startsWith('enc:v1:')) return s;
-  try {
-    const [, , ivB64, tagB64, ctB64] = s.split(':');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', MSG_ENC_KEY, Buffer.from(ivB64, 'base64'));
-    decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
-    const dec = Buffer.concat([decipher.update(Buffer.from(ctB64, 'base64')), decipher.final()]);
-    return dec.toString('utf8');
-  } catch {
-    return '[Mensagem criptografada]';
+  const [, , ivB64, tagB64, ctB64] = s.split(':');
+  const iv = Buffer.from(ivB64 || '', 'base64');
+  const tag = Buffer.from(tagB64 || '', 'base64');
+  const ct = Buffer.from(ctB64 || '', 'base64');
+  for (const key of MSG_DEC_KEYS) {
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      const dec = Buffer.concat([decipher.update(ct), decipher.final()]);
+      return dec.toString('utf8');
+    } catch {}
   }
+  return '[Mensagem criptografada]';
 }
 
 const app = express();
@@ -1108,7 +1124,8 @@ io.on('connection', async (socket) => {
     socket.join(`dm:${threadId}`);
   });
 
-  socket.on('typing_start', async ({ channelId, dmThreadId }) => {
+  async function handleTyping({ channelId, dmThreadId } = {}, isTyping) {
+    if (!channelId && !dmThreadId) return;
     if (channelId && !(await userCanAccessChannel(userId, channelId))) return;
     if (dmThreadId && !(await userCanAccessDm(userId, dmThreadId))) return;
     const room = channelId ? `channel:${channelId}` : `dm:${dmThreadId}`;
@@ -1117,20 +1134,12 @@ io.on('connection', async (socket) => {
       displayName: socket.user.display_name,
       channelId,
       dmThreadId,
-      isTyping: true
+      isTyping
     });
-  });
+  }
 
-  socket.on('typing_stop', ({ channelId, dmThreadId }) => {
-    const room = channelId ? `channel:${channelId}` : `dm:${dmThreadId}`;
-    socket.to(room).emit('typing:update', {
-      userId,
-      displayName: socket.user.display_name,
-      channelId,
-      dmThreadId,
-      isTyping: false
-    });
-  });
+  socket.on('typing_start', (payload) => handleTyping(payload, true));
+  socket.on('typing_stop', (payload) => handleTyping(payload, false));
 
   socket.on('voice:join', async (payload) => {
     const channelId = typeof payload === 'string' ? payload : payload?.channelId;
