@@ -19,10 +19,6 @@ export const NOVIDADES = {
       text: 'Com alguém transmitindo, a tela fica grande em cima e o pessoal numa fileira embaixo. Arraste a divisa pra fileira ficar maior ou menor.'
     },
     {
-      title: 'Soundboard 🔊',
-      text: 'Botão de ondinha na barra da call: buzina, ba dum tss, aplausos e mais, tocando pra todo mundo. Dá pra adicionar sons seus.'
-    },
-    {
       title: 'Enquete 📊',
       text: 'Botão de gráfico do lado do GIF, ou digite **/poll**. Cada um vota uma vez e dá pra trocar o voto.'
     },

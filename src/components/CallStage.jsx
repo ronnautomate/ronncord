@@ -1,11 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Volume2, VolumeX, Mic, MicOff, Video, VideoOff, MonitorUp, MonitorOff, Music, Sliders,
-  PhoneOff, Maximize2, MonitorX, Monitor, Headphones, HeadphoneOff, Menu, Eye, AudioLines
+  PhoneOff, Maximize2, MonitorX, Monitor, Headphones, HeadphoneOff, Menu, Eye
 } from 'lucide-react';
 import { resolveAssetUrl } from '../lib/api.js';
 import { SCREEN_QUALITIES } from '../lib/voiceManager.js';
-import { Soundboard } from './Soundboard.jsx';
 import { useActivities, ActivitiesButton, ActivitiesPanel, ActivityInvites, ActivityStage } from './activities/index.js';
 
 // ============================================================
@@ -126,7 +125,6 @@ export function CallStage({
   const [menu, setMenu] = useState(null); // { x, y, type: 'voice'|'screen', person, socketId }
   const stageRef = useRef(null);
   const act = useActivities({ socket, channelId, people });
-  const [boardOpen, setBoardOpen] = useState(false);
   const gameOn = Boolean(act.open); // um jogo ocupa o palco (no lugar da tela grande)
 
   useEffect(() => { localStorage.setItem('ronncord_stage_strip', String(side)); }, [side]);
@@ -406,14 +404,6 @@ export function CallStage({
           <Music size={22} />
         </button>
         <ActivitiesButton act={act} />
-        {onSoundboard && (
-          <div className="soundboard-wrap">
-            <button type="button" className={boardOpen ? 'on' : ''} title="Soundboard" onClick={e => { e.stopPropagation(); setBoardOpen(v => !v); }}>
-              <AudioLines size={22} />
-            </button>
-            {boardOpen && <Soundboard onPlay={onSoundboard} onUpload={onUploadSound} onClose={() => setBoardOpen(false)} />}
-          </div>
-        )}
         <button type="button" title="Configurações de voz" onClick={onOpenSettings}>
           <Sliders size={22} />
         </button>
