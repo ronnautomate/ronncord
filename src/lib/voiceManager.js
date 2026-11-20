@@ -131,6 +131,12 @@ async function applyScreenQuality(sender, qualityId) {
   }
 }
 
+// saída de áudio escolhida em Configurações > Voz e vídeo
+function outputDeviceId() {
+  const id = localStorage.getItem('ronncord_output_device');
+  return id && id !== 'default' ? id : '';
+}
+
 export function getSavedUserVolumes() {
   try {
     return JSON.parse(localStorage.getItem('ronncord_user_volumes') || '{}');
@@ -161,8 +167,11 @@ export class VoiceManager {
     this.requestedScreenQuality = new Map(); // quem assiste: socketId de quem transmite -> qualidade que eu pedi
     this.trackMetaMap = new Map(); // trackId -> 'camera' | 'screen'
     this.screenAudioMuted = new Set(); // socketId set for muted screen-share audio
+    this.watchingTarget = null; // tela de quem eu tô assistindo (socketId)
+    this.watchers = new Map(); // socketId de quem assiste -> socketId de quem transmite
     this.muted = false;
     this.deafened = false;
+    this.pttClosed = false; // apertar pra falar com a tecla solta
     this.pingTimer = null;
     this.lastSpeaking = false;
 
@@ -184,11 +193,12 @@ export class VoiceManager {
     this.channelId = channelId;
     if (initialState.muted !== undefined) this.muted = Boolean(initialState.muted);
     if (initialState.deafened !== undefined) this.deafened = Boolean(initialState.deafened);
+    if (initialState.pttClosed !== undefined) this.pttClosed = Boolean(initialState.pttClosed);
     try {
       this.pipeline = await createProcessedMicPipeline(voiceSettings);
-      this.pipeline.setMuted(this.muted);
+      this.pipeline.setMuted(this.muted || this.pttClosed);
       this.pipeline.startMeter(({ speaking }) => {
-        const actualSpeaking = !this.muted && speaking;
+        const actualSpeaking = !this.muted && !this.pttClosed && speaking;
         if (actualSpeaking !== this.lastSpeaking) {
           this.lastSpeaking = actualSpeaking;
           this.callbacks.onSpeakingChange?.(actualSpeaking);
@@ -212,7 +222,7 @@ export class VoiceManager {
     if (!this.channelId) return;
     const oldPipeline = this.pipeline;
     this.pipeline = await createProcessedMicPipeline(voiceSettings);
-    this.pipeline.setMuted(this.muted);
+    this.pipeline.setMuted(this.muted || this.pttClosed);
 
     const newAudioTrack = this.pipeline.stream.getAudioTracks()[0];
     for (const peer of this.peers.values()) {
@@ -223,7 +233,7 @@ export class VoiceManager {
     }
 
     this.pipeline.startMeter(({ speaking }) => {
-      const actualSpeaking = !this.muted && speaking;
+      const actualSpeaking = !this.muted && !this.pttClosed && speaking;
       if (actualSpeaking !== this.lastSpeaking) {
         this.lastSpeaking = actualSpeaking;
         this.callbacks.onSpeakingChange?.(actualSpeaking);
@@ -256,21 +266,36 @@ export class VoiceManager {
     this.pipeline?.destroy();
     this.pipeline = null;
     this.prevMedia = new Map();
+    this.watchingTarget = null;
+    this.watchers.clear();
+    this.callbacks.onWatchers?.({});
     this.channelId = null;
     this.lastSpeaking = false;
     this.callbacks.onPing?.(null);
     this.callbacks.onRemoteVideos?.([]);
   }
 
+  // mutar de verdade (aparece o ícone de mutado pros outros)
   setMuted(muted) {
     this.muted = muted;
-    this.pipeline?.setMuted(muted);
+    this.pipeline?.setMuted(muted || this.pttClosed);
     if (this.channelId) {
       this.socket?.emit('voice:state', {
         channelId: this.channelId,
         muted,
-        speaking: muted ? false : this.lastSpeaking
+        speaking: muted || this.pttClosed ? false : this.lastSpeaking
       });
+    }
+  }
+
+  // "apertar pra falar": fecha/abre o microfone sem marcar a pessoa como mutada (igual Discord)
+  setPttGate(closed) {
+    this.pttClosed = Boolean(closed);
+    this.pipeline?.setMuted(this.muted || this.pttClosed);
+    if (this.pttClosed && this.lastSpeaking && this.channelId) {
+      this.lastSpeaking = false;
+      this.callbacks.onSpeakingChange?.(false);
+      this.socket?.emit('voice:state', { channelId: this.channelId, speaking: false });
     }
   }
 
@@ -458,8 +483,10 @@ export class VoiceManager {
 
   async startCamera() {
     if (!this.channelId) return null;
+    const cam = localStorage.getItem('ronncord_camera');
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
+        ...(cam && cam !== 'default' ? { deviceId: { ideal: cam } } : {}),
         width: { ideal: 1920, max: 1920 },
         height: { ideal: 1080, max: 1080 },
         frameRate: { ideal: 60, max: 60 }
@@ -563,6 +590,62 @@ export class VoiceManager {
     }
   }
 
+  // a conexão com o servidor caiu e voltou (socket novo): entra de novo na mesma call
+  // e refaz as conexões com cada pessoa, levando câmera e tela que estavam ligadas
+  rejoinAfterReconnect() {
+    if (!this.channelId) return;
+    for (const sid of Array.from(this.peers.keys())) this._closePeer(sid);
+    this.socket?.emit('voice:join', { channelId: this.channelId, muted: this.muted, deafened: this.deafened });
+    if (this.cameraStream || this.screenStream) {
+      this.socket?.emit('voice:state', { channelId: this.channelId, cameraOn: Boolean(this.cameraStream), screenSharing: Boolean(this.screenStream) });
+    }
+  }
+
+  // soundboard: toca o som pra todo mundo da call (cada um toca do seu lado)
+  sendSoundboard(payload) {
+    if (!this.channelId) return;
+    for (const sid of this.peers.keys()) {
+      this.socket?.emit('webrtc:signal', { targetSocketId: sid, channelId: this.channelId, signal: { type: 'soundboard', ...payload } });
+    }
+  }
+
+  // troca a saída de áudio (fone/caixa) de tudo que toca na call
+  applyOutputDevice() {
+    const id = outputDeviceId();
+    if (this.playbackCtx?.setSinkId) this.playbackCtx.setSinkId(id).catch(() => {});
+    for (const peer of this.peers.values()) {
+      for (const el of [...(peer.audioEls?.values() || []), ...(peer.screenAudioEls?.values() || [])]) {
+        el.setSinkId?.(id).catch(() => {});
+      }
+    }
+  }
+
+  // "quem tá assistindo": cada um conta pros outros da call qual tela está vendo
+  setWatching(targetSocketId) {
+    const t = targetSocketId || null;
+    if (t === this.watchingTarget) return;
+    this.watchingTarget = t;
+    for (const sid of this.peers.keys()) this._sendWatching(sid);
+  }
+
+  _sendWatching(targetSocketId) {
+    if (!this.channelId) return;
+    this.socket?.emit('webrtc:signal', {
+      targetSocketId,
+      channelId: this.channelId,
+      signal: { type: 'watching', target: this.watchingTarget }
+    });
+  }
+
+  _emitWatchers() {
+    const byTarget = {};
+    for (const [viewer, target] of this.watchers.entries()) {
+      if (!target) continue;
+      (byTarget[target] ||= []).push(viewer);
+    }
+    this.callbacks.onWatchers?.(byTarget);
+  }
+
   async _handlePeers({ channelId, peers }) {
     if (channelId !== this.channelId) return;
     for (const peer of peers) {
@@ -601,6 +684,16 @@ export class VoiceManager {
 
   async _handleSignal({ fromSocketId, channelId, user, signal }) {
     if (channelId !== this.channelId) return;
+    if (signal.type === 'soundboard') {
+      this.callbacks.onSoundboard?.({ fromSocketId, sound: signal.sound, url: signal.url, emoji: signal.emoji, name: signal.name });
+      return;
+    }
+    if (signal.type === 'watching') {
+      if (signal.target) this.watchers.set(fromSocketId, signal.target);
+      else this.watchers.delete(fromSocketId);
+      this._emitWatchers();
+      return;
+    }
     if (signal.type === 'screen-quality') {
       if (signal.quality === 'source') this.screenQualityForPeer.delete(fromSocketId);
       else this.screenQualityForPeer.set(fromSocketId, String(signal.quality));
@@ -826,6 +919,7 @@ export class VoiceManager {
         audioEl.autoplay = true;
         audioEl.playsInline = true;
         audioEl.srcObject = trackStream;
+        if (outputDeviceId()) audioEl.setSinkId?.(outputDeviceId()).catch(() => {});
         audioPool.appendChild(audioEl);
 
         if (isScreenAudio) {
@@ -850,6 +944,7 @@ export class VoiceManager {
         if (!this.playbackCtx) {
           const Ctx = window.AudioContext || window.webkitAudioContext;
           this.playbackCtx = new Ctx({ latencyHint: 'interactive' });
+          if (outputDeviceId() && this.playbackCtx.setSinkId) this.playbackCtx.setSinkId(outputDeviceId()).catch(() => {});
         }
         if (this.playbackCtx.state === 'suspended') {
           this.playbackCtx.resume().catch(() => {});
@@ -905,6 +1000,7 @@ export class VoiceManager {
     };
 
     this.peers.set(targetSocketId, { pc, micSender, audioEls, screenAudioEls, gainNodes, userId, displayName, pendingCandidates: [] });
+    if (this.watchingTarget) this._sendWatching(targetSocketId);
     return pc;
   }
 
@@ -929,6 +1025,11 @@ export class VoiceManager {
     this.peers.delete(socketId);
     this.screenQualityForPeer.delete(socketId);
     this.requestedScreenQuality.delete(socketId);
+    let watchChanged = this.watchers.delete(socketId);
+    for (const [viewer, target] of this.watchers.entries()) {
+      if (target === socketId) { this.watchers.delete(viewer); watchChanged = true; }
+    }
+    if (watchChanged) this._emitWatchers();
     let changed = false;
     for (const [key, val] of this.remoteVideos.entries()) {
       if (val.socketId === socketId) {
