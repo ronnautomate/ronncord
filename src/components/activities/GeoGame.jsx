@@ -237,7 +237,10 @@ function GeoRound({ act, g }) {
         viewer.on('error', () => { if (vivo && reserva) usar(reserva, null); });
       };
       const alta = !celular() && l.hd;
-      const pxId = /panoramax\./.test(l.img || '') ? l.id : null;
+      // dá pra andar: fotos do Panoramax (sequência deles) ou fotos extras que vieram com a sequência (nosso servidor)
+      const ehPx = (l.fonte ? l.fonte === 'px' : true) && /panoramax\./.test(l.img || '');
+      const ehExtra = l.fonte === 'extra' && l.anda;
+      const pxId = ehPx || ehExtra ? l.id : null;
       if (!pxId) usar(alta ? l.hd : l.img, alta ? l.img : null);
       else {
         // ===== andar pela rua (modo "Moving" do GeoGuessr) =====
@@ -247,6 +250,12 @@ function GeoRound({ act, g }) {
         const cache = new Map();
         const info = async id => {
           if (cache.has(id)) return cache.get(id);
+          if (ehExtra) {
+            const n = await apiFetch(`/api/activities/geo/no/${id}`);
+            const out = { id, sd: n.img, hd: n.img, az: Number(n.az) || 0, lat: n.lat, lon: n.lon, viz: n.viz || [] };
+            cache.set(id, out);
+            return out;
+          }
           const r = await fetch(API + id, { signal: AbortSignal.timeout(8000) });
           const f = (await r.json()).features?.[0];
           if (!f) throw new Error('sem foto');
