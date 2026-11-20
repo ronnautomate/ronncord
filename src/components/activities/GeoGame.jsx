@@ -56,6 +56,25 @@ function pinIcon(p) {
   const dentro = p.avatarUrl ? `<img src="${esc(resolveAssetUrl(p.avatarUrl))}" alt="">` : esc((p.name || '?')[0].toUpperCase());
   return window.L.divIcon({ className: '', html: `<div class="geo-pino" style="background:${corOk(p.color)}" title="${esc(p.name)}">${dentro}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
 }
+// número que sobe animado (igual a contagem de pontos do GeoGuessr)
+function useContagem(alvo, atraso = 700, dur = 1400) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    let raf, ini;
+    const t = setTimeout(() => {
+      const passo = ts => {
+        ini ??= ts;
+        const k = Math.min(1, (ts - ini) / dur);
+        setV(Math.round(alvo * (1 - Math.pow(1 - k, 3))));
+        if (k < 1) raf = requestAnimationFrame(passo);
+      };
+      raf = requestAnimationFrame(passo);
+    }, atraso);
+    return () => { clearTimeout(t); cancelAnimationFrame(raf); };
+  }, [alvo]);
+  return v;
+}
+
 const tempoTxt = v => (!v ? 'Sem limite' : v < 120 ? `${v}s` : `${v / 60} min`);
 
 export function GeoGame({ act, g }) {
@@ -140,6 +159,15 @@ function GeoRound({ act, g }) {
   const jaChutei = g.chutaram.includes(act.myId) || enviadoRef.current;
   const meuRef = useRef({ jogador, jaChutei, chute });
   meuRef.current = { jogador, jaChutei, chute };
+
+  // sons: foto nova (swoosh) e quando outra pessoa chuta
+  useEffect(() => { SoundFX.geo('swoosh'); }, []);
+  const outrosChutes = g.chutaram.filter(id => id !== act.myId).length;
+  const outrosRef = useRef(outrosChutes);
+  useEffect(() => {
+    if (outrosChutes > outrosRef.current) SoundFX.geo('chutou');
+    outrosRef.current = outrosChutes;
+  }, [outrosChutes]);
 
   // relógio: o servidor manda quanto falta; aqui vira hora local
   useEffect(() => { fimRef.current = g.restante ? Date.now() + g.restante : 0; }, [g]);
@@ -285,6 +313,19 @@ function GeoResult({ act, g }) {
   const ultima = g.rodada + 1 >= g.total;
   const host = g.host === act.myId;
 
+  // sons do resultado: fecha a rodada, conta os pontos e, se for o caso, na mosca ou longe demais
+  useEffect(() => {
+    const meu = res.chutes[act.myId];
+    const timers = [];
+    SoundFX.geo('portas');
+    timers.push(setTimeout(() => SoundFX.geo('pontos'), 700));
+    if (g.jogadores.includes(act.myId)) {
+      if (meu && meu.pts >= 4500) timers.push(setTimeout(() => SoundFX.geo('naMosca'), 1900));
+      else if (!meu || meu.pts < 500) timers.push(setTimeout(() => SoundFX.geo('longe'), 1900));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
   useEffect(() => {
     const L = window.L;
     const map = L.map(mapDiv.current, { worldCopyJump: true });
@@ -308,41 +349,56 @@ function GeoResult({ act, g }) {
     return () => { clearTimeout(t); map.remove(); };
   }, []);
 
-  const botao = host
-    ? <button type="button" className="act-btn forte" onClick={() => act.geo('proxima')}>{ultima ? 'Ver resultado final 🏁' : 'Próxima rodada ▶'}</button>
-    : <span className="act-vazio act-pouco">{act.person(g.host, g).name} passa pra próxima</span>;
+  const meu = res.chutes[act.myId];
+  const souJogador = g.jogadores.includes(act.myId);
+  const meusPts = meu?.pts || 0;
+  const contado = useContagem(meusPts);
+  const [verDica, setVerDica] = useState(true);
 
   return (
     <>
-      <ActTop act={act} kind="geo" right={botao}><b className="geo-rodada">Rodada {g.rodada + 1}/{g.total}</b></ActTop>
-      <div className="geo-resultado">
+      <ActTop act={act} kind="geo"><b className="geo-rodada">Rodada {g.rodada + 1}/{g.total}</b></ActTop>
+      <div className="geo-resultado gg">
         <div className="geo-mapa" ref={mapDiv} />
-        <div className="geo-lado">
-          {l?.pais && (
-            <div className="geo-dica">
-              <div className="pais">
-                {/^[A-Z]{2}$/.test(l.cc) && <img src={`https://flagcdn.com/w80/${l.cc.toLowerCase()}.png`} alt="" />}
-                {l.pais.n}
-              </div>
-              <small>perto de {l.perto}</small>
-              <b className="titulo">Como acertar da próxima</b>
-              <p>{l.pais.d}</p>
+        {l?.pais && verDica && (
+          <div className="geo-dica gg-dica">
+            <button type="button" className="gg-x" onClick={() => setVerDica(false)} title="Esconder dica">×</button>
+            <div className="pais">
+              {/^[A-Z]{2}$/.test(l.cc) && <img src={`https://flagcdn.com/w80/${l.cc.toLowerCase()}.png`} alt="" />}
+              {l.pais.n}
             </div>
-          )}
-          <div className="geo-destaque">
-            {perto.length
-              ? <>🎯 Mais perto: <b>{act.person(perto[0].id, g).name}</b>, a {kmTxt(perto[0].c.km)} (+{fmt(perto[0].c.pts)})</>
-              : 'Ninguém chutou dessa vez 😅'}
+            <small>perto de {l.perto}</small>
+            <b className="titulo">Como acertar da próxima</b>
+            <p>{l.pais.d}</p>
           </div>
-          <div className="geo-linhas">
-            {linhas.map((x, i) => {
+        )}
+        <div className="gg-painel">
+          <div className="gg-meu">
+            {souJogador ? (
+              <>
+                <div className="gg-pontos"><b>{fmt(contado)}</b> pontos</div>
+                <div className="gg-barra"><i style={{ width: `${(contado / 5000) * 100}%` }} /></div>
+                <div className="gg-km">{meu ? <>Seu chute foi a <b>{kmTxt(meu.km)}</b> do local certo</> : 'Você não chutou nessa rodada'}</div>
+              </>
+            ) : (
+              <div className="gg-km">{perto.length ? <>🎯 Mais perto: <b>{act.person(perto[0].id, g).name}</b>, a {kmTxt(perto[0].c.km)}</> : 'Ninguém chutou dessa vez 😅'}</div>
+            )}
+          </div>
+          <div className="gg-acao">
+            {host
+              ? <button type="button" className="gg-btn" onClick={() => act.geo('proxima')}>{ultima ? 'Ver resultado final' : 'Próxima rodada'}</button>
+              : <span className="act-vazio act-pouco">{act.person(g.host, g).name} passa pra próxima</span>}
+          </div>
+          <div className="gg-ranking">
+            {linhas.slice(0, 5).map((x, i) => {
               const p = act.person(x.id, g);
               return (
-                <div key={x.id} className={`geo-linha ${x.id === act.myId ? 'eu' : ''}`}>
-                  <span className="pos">{medalha(i)}</span>
-                  <ActAvatar person={p} size={32} />
-                  <span className="nome">{p.name}<small>{x.c ? kmTxt(x.c.km) : 'não chutou'}</small></span>
-                  <span className="pts">{fmt(x.total)}<small>+{fmt(x.c?.pts || 0)}</small></span>
+                <div key={x.id} className={`gg-linha ${x.id === act.myId ? 'eu' : ''}`}>
+                  <span className="pos">{i + 1}</span>
+                  <ActAvatar person={p} size={24} />
+                  <span className="nome">{p.name}</span>
+                  <span className="mais">{x.c ? `+${fmt(x.c.pts)}` : '—'}</span>
+                  <span className="pts">{fmt(x.total)}</span>
                 </div>
               );
             })}
@@ -353,9 +409,46 @@ function GeoResult({ act, g }) {
   );
 }
 
+// mapa do fim de jogo: todas as rodadas, com o lugar certo numerado e o chute de cada um
+function GeoResumoMapa({ act, g }) {
+  const div = useRef(null);
+  useEffect(() => {
+    const L = window.L;
+    const map = L.map(div.current, { worldCopyJump: true });
+    tileLayer().addTo(map);
+    const pts = [];
+    g.historico.forEach((r, i) => {
+      const l = r.local;
+      L.marker([l.lat, l.lon], { icon: L.divIcon({ className: '', html: `<div class="gg-num">${i + 1}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }), zIndexOffset: 1000 }).addTo(map);
+      pts.push([l.lat, l.lon]);
+      for (const [id, c] of Object.entries(r.chutes || {})) {
+        if (!c) continue;
+        let lon = c.lon;
+        while (lon - l.lon > 180) lon -= 360;
+        while (lon - l.lon < -180) lon += 360;
+        const p = act.person(id, g);
+        L.marker([c.lat, lon], { icon: pinIcon(p) }).addTo(map);
+        L.polyline([[c.lat, lon], [l.lat, l.lon]], { color: corOk(p.color), weight: 2, dashArray: '4 6', opacity: 0.85 }).addTo(map);
+        pts.push([c.lat, lon]);
+      }
+    });
+    if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 6 });
+    else map.setView(pts[0] || [20, 0], 3);
+    const t = setTimeout(() => map.invalidateSize(), 120);
+    return () => { clearTimeout(t); map.remove(); };
+  }, []);
+  return <div className="gg-mapa-fim" ref={div} />;
+}
+
 // ----- fim: pódio + placar + ranking da semana -----
 function GeoEnd({ act, g }) {
   const linhas = g.jogadores.map(id => ({ id, total: g.placar[id] || 0 })).sort((a, b) => b.total - a.total);
+  const souJogador = g.jogadores.includes(act.myId);
+  const venci = linhas[0]?.id === act.myId;
+  useEffect(() => { if (souJogador) SoundFX.geo(venci ? 'vitoria' : 'derrota'); }, []);
+  const meuTotal = g.placar[act.myId] || 0;
+  const maximo = Math.max(1, g.total * 5000);
+  const contado = useContagem(meuTotal, 500, 1800);
   const host = g.host === act.myId;
   const degrau = (x, lugar, altura, cor) => {
     if (!x) return <div />;
@@ -372,8 +465,16 @@ function GeoEnd({ act, g }) {
   return (
     <>
       <ActTop act={act} kind="geo"><b className="geo-rodada">Fim de jogo!</b></ActTop>
-      <div className="act-meio">
+      <div className={`act-meio ${window.L && g.historico?.length ? 'gg-fim' : ''}`}>
+        {window.L && g.historico?.length > 0 && <GeoResumoMapa act={act} g={g} />}
         <div className="act-cartao">
+          {souJogador && (
+            <div className="gg-total">
+              <div className="gg-pontos"><b>{fmt(contado)}</b> de {fmt(maximo)} pontos</div>
+              <div className="gg-barra"><i style={{ width: `${(contado / maximo) * 100}%` }} /></div>
+              <div className="gg-km">{venci ? '🏆 Você ganhou!' : `Você ficou em ${linhas.findIndex(x => x.id === act.myId) + 1}º`}</div>
+            </div>
+          )}
           <div className="geo-podio">
             {degrau(linhas[1], 2, 90, '#8e9aa8')}
             {degrau(linhas[0], 1, 130, '#c9a24a')}

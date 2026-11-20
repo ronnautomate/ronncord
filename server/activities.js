@@ -177,6 +177,7 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
     g.priv.locais = escolhidos;
     g.total = escolhidos.length;
     g.rodada = -1;
+    g.historico = [];
     g.placar = Object.fromEntries(g.jogadores.map(id => [id, 0]));
     g.priv.jogaram = new Set(g.jogadores);
     geoProxima(g);
@@ -212,6 +213,8 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
     g.fase = 'resultado';
     g.fimEm = 0;
     g.resultado = { local: { lat: l.lat, lon: l.lon, cc: l.cc, perto: l.perto, pais }, chutes };
+    // resumo de todas as rodadas (o fim de jogo mostra tudo no mapa, igual GeoGuessr)
+    g.historico = [...(g.historico || []), { local: { lat: l.lat, lon: l.lon, cc: l.cc }, chutes }];
     emitir(g);
   }
   async function geoTerminar(g) {
