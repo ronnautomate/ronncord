@@ -391,3 +391,55 @@
   .act-invite .act-btn { flex: 1; }
   .act-panel { position: fixed; left: 10px; right: 10px; bottom: 72px; transform: none; width: auto; max-height: calc(100dvh - 140px); overflow-y: auto; }
 }
+
+/* ===== resultado e fim com cara de GeoGuessr (20/11/2026) ===== */
+.geo-resultado.gg { position: relative; display: block; flex: 1; min-height: 0; border-radius: 10px; overflow: hidden; }
+.geo-resultado.gg > .geo-mapa { position: absolute; inset: 0; border-radius: 0; height: auto; }
+.gg-dica {
+  position: absolute; right: 12px; top: 12px; z-index: 500; width: min(300px, calc(100% - 70px)); max-height: 45%; overflow-y: auto;
+  background: rgba(16, 18, 24, 0.92); color: #fff; border-radius: 10px; padding: 12px 14px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+.gg-dica .gg-x { position: absolute; right: 8px; top: 4px; background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; opacity: 0.7; }
+.gg-dica .gg-x:hover { opacity: 1; }
+.gg-painel {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 500; display: grid; grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 1fr);
+  gap: 18px; align-items: center; padding: 16px 20px; background: linear-gradient(180deg, rgba(26, 20, 64, 0.94), rgba(16, 12, 44, 0.98));
+  color: #fff; border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.gg-pontos { font-size: 15px; color: #d7d4f4; }
+.gg-pontos b { font-size: 34px; font-weight: 900; color: #fecd19; font-style: italic; letter-spacing: -0.02em; margin-right: 4px; font-variant-numeric: tabular-nums; }
+.gg-barra { height: 12px; border-radius: 6px; background: rgba(255, 255, 255, 0.12); overflow: hidden; margin: 8px 0 6px; }
+.gg-barra i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, #fecd19, #ffe36b); box-shadow: 0 0 12px rgba(254, 205, 25, 0.5); }
+.gg-km { font-size: 14px; color: #d7d4f4; }
+.gg-km b { color: #fff; }
+.gg-btn {
+  background: #6cb928; color: #fff; border: none; border-radius: 999px; padding: 14px 30px; font: inherit; font-size: 16px; font-weight: 800;
+  font-style: italic; cursor: pointer; box-shadow: 0 4px 0 #4c8a17; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap;
+}
+.gg-btn:hover { filter: brightness(1.08); }
+.gg-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #4c8a17; }
+.gg-ranking { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gg-linha { display: grid; grid-template-columns: 18px 24px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; font-size: 13px; padding: 3px 6px; border-radius: 6px; }
+.gg-linha.eu { background: rgba(254, 205, 25, 0.14); }
+.gg-linha .pos { color: #a9a4d6; font-weight: 800; text-align: center; }
+.gg-linha .nome { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gg-linha .mais { color: #fecd19; font-weight: 700; font-size: 12px; }
+.gg-linha .pts { font-weight: 800; font-variant-numeric: tabular-nums; min-width: 48px; text-align: right; }
+.gg-fim { gap: 16px; align-items: stretch; }
+.gg-mapa-fim { flex: 1.3 1 0; min-width: 0; min-height: 320px; border-radius: 10px; }
+.gg-fim > .act-cartao { flex: 1 1 0; }
+.gg-total { background: linear-gradient(180deg, #1a1440, #100c2c); color: #fff; border-radius: 10px; padding: 14px 16px; }
+.gg-num {
+  width: 26px; height: 26px; border-radius: 50%; background: #fecd19; color: #1a1440; display: grid; place-items: center;
+  font-weight: 900; font-size: 13px; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+@media (max-width: 760px) {
+  .gg-painel { grid-template-columns: 1fr; gap: 10px; padding: 12px; }
+  .gg-pontos b { font-size: 26px; }
+  .gg-acao { order: 3; }
+  .gg-btn { width: 100%; padding: 12px; }
+  .gg-ranking { display: none; }
+  .gg-dica { max-height: 30%; }
+  .gg-fim { flex-direction: column; }
+  .gg-mapa-fim { min-height: 240px; flex: none; }
+}

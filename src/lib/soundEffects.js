@@ -85,7 +85,7 @@ function playChime(notes, { type = 'sine', volume = 0.16, filterFreq = 2600 } = 
 
 // Sons do Discord (os mesmos do discordia): ficam em public/sounds/ e baixam uma vez só.
 // Se o arquivo falhar, toca o bipe sintetizado de antes.
-const SOUND_FILES = { entrar: 'entrar', sair: 'sair', mencao: 'mencao', mutar: 'mutar', contagem: 'geo-contagem' };
+const SOUND_FILES = { entrar: 'entrar', sair: 'sair', mencao: 'mencao', mutar: 'mutar', contagem: 'geo-contagem', swoosh: 'geo-swoosh', chutou: 'geo-chutou', portas: 'geo-portas', pontos: 'geo-pontos', naMosca: 'geo-na-mosca', longe: 'geo-longe', vitoria: 'geo-vitoria', derrota: 'geo-derrota' };
 const soundBuffers = {};
 
 function loadSound(name) {
@@ -231,6 +231,8 @@ export const SoundFX = {
   screenShare: screenShareBeeps,
   // contagem dos últimos segundos da rodada do GeoGuessr (o som do GeoGuessr de verdade)
   geoCountdown() { playFile('contagem', null, 0.5); },
+  // sons do GeoGuessr de verdade: swoosh, chutou, portas, pontos, naMosca, longe, vitoria
+  geo(name) { playFile(name, null, 0.5); },
   joinVoice: () => playFile('entrar', Chimes.joinVoice),
   leaveVoice: () => playFile('sair', Chimes.leaveVoice),
   userJoined: () => playFile('entrar', Chimes.userJoined),
