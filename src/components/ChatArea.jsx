@@ -1,8 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Hash, AtSign, Search, Users, PlusCircle, Smile, SendHorizontal,
-  Reply, Pencil, Trash2, X, Paperclip, FileText, Pin, Mic, Square, Menu
+  Reply, Pencil, Trash2, X, Paperclip, FileText, Pin, Mic, Square, Menu, BarChart3
 } from 'lucide-react';
+import { parsePoll } from '../lib/poll.js';
+import { PollCard } from './PollCard.jsx';
+import { PollModal } from './PollModal.jsx';
 import { resolveAssetUrl } from '../lib/api.js';
 import { GifPicker } from './GifPicker.jsx';
 import { ImageViewer } from './ImageViewer.jsx';
@@ -103,9 +106,11 @@ export function ChatArea({
   onUploadFile,
   onTyping,
   onSelectUser,
-  onOpenNav
+  onOpenNav,
+  onVotePoll
 }) {
   const [text, setText] = useState('');
+  const [pollDraft, setPollDraft] = useState(null); // null | pergunta inicial da janela de enquete
   const [searchQuery, setSearchQuery] = useState('');
   const [replyTo, setReplyTo] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -219,6 +224,12 @@ export function ChatArea({
     e.preventDefault();
     if (!text.trim() && attachments.length === 0) return;
     const content = text.trim();
+    // "/poll" sem as opções abre a janela de enquete com o que já foi escrito
+    if (/^\/(poll|enquete)(\s|$)/i.test(content) && !parsePoll(content)) {
+      setPollDraft(content.replace(/^\/(poll|enquete)\s*/i, '').split('|')[0].trim());
+      setText('');
+      return;
+    }
     const currentAttachments = [...attachments];
     const currentReply = replyTo?.id || null;
 
@@ -495,7 +506,15 @@ export function ChatArea({
                       <small>Enter para salvar • Esc para cancelar</small>
                     </form>
                   ) : (
-                    msg.content && (
+                    msg.content && parsePoll(msg.content) ? (
+                      <PollCard
+                        poll={parsePoll(msg.content)}
+                        votes={msg.poll_votes || []}
+                        currentUserId={currentUser?.id}
+                        members={members}
+                        onVote={onVotePoll ? option => onVotePoll(msg.id, option) : undefined}
+                      />
+                    ) : msg.content && (
                       <>
                         <p className="message-text">
                           {renderFormattedText(isAviso ? avisoText(msg.content) : msg.content)}
@@ -518,6 +537,10 @@ export function ChatArea({
                         const fullUrl = resolveAssetUrl(att.url);
                         const isImg = isImageAttachment(att);
                         const isAudio = att.mimetype?.startsWith('audio/') || /\.(webm|ogg|mp3|wav)$/i.test(att.name || '');
+                        if (isImg && /^sticker-/i.test(att.name || '')) {
+                          // figurinha: pequena e sem moldura, igual Discord
+                          return <img key={idx} className="chat-sticker" src={fullUrl} alt={att.name.replace(/^sticker-|\.webp$/gi, '')} loading="lazy" />;
+                        }
                         if (isImg) {
                           return (
                             <button
@@ -661,7 +684,10 @@ export function ChatArea({
                 key={c.cmd}
                 type="button"
                 className="mention-option"
-                onClick={() => { setText(`${c.cmd} `); textInputRef.current?.focus(); }}
+                onClick={() => {
+                  if (c.window === 'poll') { setText(''); setPollDraft(''); return; }
+                  setText(`${c.cmd} `); textInputRef.current?.focus();
+                }}
               >
                 <strong>{c.cmd}</strong>
                 <small style={{ marginLeft: 0 }}>{c.args}</small>
@@ -737,6 +763,12 @@ export function ChatArea({
             </button>
           )}
 
+          {!recording && (
+            <button type="button" className="icon-btn" title="Criar enquete" onClick={() => setPollDraft('')}>
+              <BarChart3 size={19} />
+            </button>
+          )}
+
           <div style={{ position: 'relative' }}>
             <button
               type="button"
@@ -793,6 +825,13 @@ export function ChatArea({
 
       {viewer && (
         <ImageViewer images={viewer.images} startIndex={viewer.index} onClose={() => setViewer(null)} />
+      )}
+      {pollDraft !== null && (
+        <PollModal
+          initialQuestion={pollDraft}
+          onClose={() => setPollDraft(null)}
+          onSend={content => onSendMessage({ content, attachments: [], reply_to_id: null })}
+        />
       )}
     </main>
   );
