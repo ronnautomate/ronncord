@@ -477,3 +477,74 @@
 .geo-foto .pnlm-compass { top: 10px; right: 10px; left: auto; width: 48px; height: 48px; }
 @media (max-width: 760px) { .geo-mapa-caixa.p, .geo-mapa-caixa.p:hover { opacity: 1; } }
 @media (max-width: 640px) { .geo-mapa-caixa.p, .geo-mapa-caixa.p:hover, .geo-mapa-caixa.p:focus-within { width: auto; height: 48%; } }
+
+/* ===== HUD igual GeoGuessr (20/11/2026) ===== */
+.geo-jogo:fullscreen { background: #000; }
+.geo-foto .pnlm-controls-container, .geo-foto .pnlm-compass { display: none !important; }
+.gg-hud-topo { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
+.gg-bussola {
+  position: relative; width: 260px; height: 34px; overflow: hidden; border-radius: 999px; background: rgba(28, 22, 54, 0.88);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45); -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+}
+.gg-bussola::after { content: ''; position: absolute; left: 50%; top: 4px; bottom: 4px; width: 2px; margin-left: -1px; background: #fecd19; border-radius: 1px; }
+.gg-faixa { position: absolute; left: 130px; top: 0; height: 100%; will-change: transform; }
+.gg-marca { position: absolute; top: 50%; width: 2px; height: 12px; margin: -6px 0 0 -1px; background: rgba(255, 255, 255, 0.55); border-radius: 1px; }
+.gg-marca.letra { width: auto; height: auto; background: none; margin: 0; transform: translate(-50%, -50%); color: #fff; font-size: 12px; font-weight: 800; letter-spacing: 0.02em; }
+.gg-marca.norte { color: #fecd19; font-size: 14px; }
+.gg-relogio {
+  min-width: 118px; text-align: center; padding: 8px 22px; border-radius: 999px; background: rgba(28, 22, 54, 0.92); color: #fff;
+  font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; border: 3px solid #6d5dfc; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+.gg-relogio.pouco { border-color: #e34a4a; color: #ffd0d0; animation: gg-pisca 1s infinite; }
+@keyframes gg-pisca { 50% { transform: scale(1.06); } }
+.gg-hud-eu { position: absolute; left: 12px; top: 12px; z-index: 6; display: flex; align-items: center; gap: 0; pointer-events: none; }
+.gg-hud-eu .act-avatar { position: relative; z-index: 2; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
+.gg-hud-barra {
+  position: relative; width: clamp(100px, 12vw, 220px); height: 30px; margin-left: -10px; border-radius: 0 8px 8px 0; overflow: hidden; background: rgba(28, 22, 54, 0.9);
+  border: 2px solid #6d5dfc; transform: skewX(-12deg); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+.gg-hud-barra i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #4f9e1f, #7ed33a); transition: width 0.6s ease; }
+.gg-hud-barra b { position: relative; display: block; text-align: center; line-height: 26px; color: #fff; font-weight: 900; font-style: italic; font-size: 16px; transform: skewX(12deg); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }
+.gg-hud-rodada {
+  position: absolute; right: 12px; top: 12px; z-index: 6; padding: 6px 14px; border-radius: 8px; background: rgba(28, 22, 54, 0.88); color: #d7d4f4;
+  font-size: 13px; font-weight: 700; pointer-events: none; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+.gg-hud-rodada b { color: #fff; font-size: 16px; }
+.gg-hud-lado { position: absolute; left: 12px; bottom: 14px; z-index: 6; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.gg-zoom { display: flex; flex-direction: column; background: rgba(28, 22, 54, 0.88); border-radius: 999px; overflow: hidden; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45); }
+.gg-zoom button, .gg-redondo {
+  width: 42px; height: 42px; border: none; background: transparent; color: #fff; font-size: 22px; font-weight: 700; cursor: pointer; display: grid; place-items: center;
+}
+.gg-zoom button + button { border-top: 1px solid rgba(255, 255, 255, 0.15); }
+.gg-zoom button:hover, .gg-redondo:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+.gg-redondo { border-radius: 50%; background: rgba(28, 22, 54, 0.88); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45); font-size: 20px; }
+.gg-redondo:disabled { opacity: 0.4; cursor: default; }
+/* setas do Street View: chevron branco no chão */
+.geo-seta { width: 64px; height: 34px; margin: -17px 0 0 -32px; border-radius: 0; background: none !important; border: none; box-shadow: none; display: block; }
+.geo-seta svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.7)); }
+.geo-seta svg path { fill: none; stroke: #fff; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; transition: stroke 0.15s; }
+.geo-seta:hover svg path { stroke: #fecd19; opacity: 1; }
+.geo-seta:hover { transform: scale(1.12); }
+/* minimapa: botões de crescer/diminuir/fixar em cima e o CHUTAR embaixo */
+.gg-mapa-tam { display: flex; gap: 4px; }
+.gg-mapa-tam button { width: 28px; height: 26px; border: none; border-radius: 6px; background: rgba(28, 22, 54, 0.9); color: #fff; font-size: 14px; cursor: pointer; display: grid; place-items: center; }
+.gg-mapa-tam button:hover { background: #3a2f80; }
+.gg-mapa-tam button.ativo { background: #6d5dfc; }
+.gg-chutar {
+  border: none; border-radius: 999px; padding: 11px; font: inherit; font-size: 15px; font-weight: 900; font-style: italic; text-transform: uppercase;
+  letter-spacing: 0.02em; color: #fff; background: #6cb928; box-shadow: 0 3px 0 #4c8a17; cursor: pointer;
+}
+.gg-chutar:disabled { background: #4b4a5e; box-shadow: 0 3px 0 #33323f; color: #c9c7d8; cursor: default; }
+.gg-chutar.verde:not(:disabled) { background: #6cb928; }
+.geo-mapa-caixa { background: rgba(28, 22, 54, 0.92); }
+@media (max-width: 640px) {
+  .gg-bussola { width: 200px; height: 28px; }
+  .gg-faixa { left: 100px; }
+  .gg-relogio { font-size: 17px; padding: 5px 14px; min-width: 86px; }
+  .gg-hud-barra { width: 120px; height: 24px; }
+  .gg-hud-barra b { line-height: 20px; font-size: 13px; }
+  .gg-hud-eu .act-avatar { width: 34px !important; height: 34px !important; }
+  .gg-hud-lado { bottom: auto; top: 70px; }
+  .gg-hud-rodada { top: 54px; }
+}
