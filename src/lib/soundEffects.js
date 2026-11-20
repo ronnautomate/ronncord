@@ -30,6 +30,16 @@ export function setSoundVolume(v) {
   localStorage.setItem('ronncord_sound_volume', String(Math.max(0, Math.min(100, Number(v)))));
 }
 
+// volume dos sons dos jogos da call (GeoGuessr etc.), separado do resto; fica no botão de som do jogo
+export function getGameVolume() {
+  const raw = localStorage.getItem('ronncord_game_volume');
+  const v = Number(raw);
+  return raw !== null && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 80;
+}
+export function setGameVolume(v) {
+  localStorage.setItem('ronncord_game_volume', String(Math.max(0, Math.min(100, Number(v)))));
+}
+
 // saída de áudio escolhida (Configurações > Voz e vídeo); Chrome 110+ aceita no AudioContext
 export function applyOutputDevice(ctx) {
   const id = localStorage.getItem('ronncord_output_device');
@@ -230,9 +240,9 @@ export const SoundFX = {
   // alguém (eu ou outra pessoa da call) começou a transmitir a tela
   screenShare: screenShareBeeps,
   // contagem dos últimos segundos da rodada do GeoGuessr (o som do GeoGuessr de verdade)
-  geoCountdown() { playFile('contagem', null, 0.5); },
+  geoCountdown() { if (localStorage.getItem('ronncord_game_contagem') !== 'off') playFile('contagem', null, 0.6 * getGameVolume() / 100); },
   // sons do GeoGuessr de verdade: swoosh, chutou, portas, pontos, naMosca, longe, vitoria
-  geo(name) { playFile(name, null, 0.5); },
+  geo(name) { playFile(name, null, 0.6 * getGameVolume() / 100); },
   joinVoice: () => playFile('entrar', Chimes.joinVoice),
   leaveVoice: () => playFile('sair', Chimes.leaveVoice),
   userJoined: () => playFile('entrar', Chimes.userJoined),

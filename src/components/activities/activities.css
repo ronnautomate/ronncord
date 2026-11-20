@@ -451,3 +451,16 @@
 .geo-seta .pnlm-tooltip, .geo-seta span.pnlm-tooltip { display: none; }
 .geo-voltar { position: absolute; left: 12px; bottom: 12px; z-index: 5; background: rgba(16, 18, 24, 0.85); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
 .geo-voltar:hover { background: rgba(16, 18, 24, 0.95); }
+
+/* ===== som do jogo (volume dos efeitos) ===== */
+.act-som { position: relative; }
+.act-som-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 900; width: 240px; display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg-rail); border: 1px solid var(--line); border-radius: 10px; padding: 12px; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45); color: var(--text);
+}
+.act-som-pop label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.act-som-pop label span { display: flex; justify-content: space-between; }
+.act-som-pop label i { font-style: normal; color: var(--text-muted); }
+.act-som-pop input[type=range] { width: 100%; accent-color: var(--accent); }
+.act-som-pop .act-som-check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+.act-som-pop small { color: var(--text-muted); font-size: 11px; line-height: 1.35; }
