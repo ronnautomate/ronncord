@@ -30,6 +30,7 @@ import { WhatsNewModal } from './components/WhatsNewModal.jsx';
 import { ServerSettingsModal } from './components/ServerSettingsModal.jsx';
 import { CallStage } from './components/CallStage.jsx';
 import { MiniCall } from './components/MiniCall.jsx';
+import { CallTimer } from './components/CallTimer.jsx';
 import { NOVIDADES, isNew, markSeen } from './lib/novidades.js';
 import './style.css';
 import './discordia-extras.css';
@@ -122,6 +123,8 @@ function App() {
   const [typingMap, setTypingMap] = useState({});
   const [voiceChannelId, setVoiceChannelId] = useState(null);
   const [voiceParticipants, setVoiceParticipants] = useState({});
+  const [voiceStartedAt, setVoiceStartedAt] = useState({}); // channelId -> início da call (relógio do servidor)
+  const [serverClockOffset, setServerClockOffset] = useState(0);
   const [voicePing, setVoicePing] = useState(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
@@ -288,6 +291,8 @@ function App() {
         if (srvData.voiceParticipants) {
           setVoiceParticipants(prev => ({ ...srvData.voiceParticipants, ...prev }));
         }
+        if (srvData.voiceStartedAt) setVoiceStartedAt(prev => ({ ...srvData.voiceStartedAt, ...prev }));
+        if (srvData.serverNow) setServerClockOffset(srvData.serverNow - Date.now());
         setFriends(frData.friends);
         setDmThreads(dmData.threads);
         joinAllRooms(srvData.servers, dmData.threads);
@@ -547,7 +552,9 @@ function App() {
           return { ...prev, [key]: next };
         });
       });
-      socket.on('voice:participants', ({ channelId, participants }) => {
+      socket.on('voice:participants', ({ channelId, participants, startedAt, serverNow }) => {
+        if (serverNow) setServerClockOffset(serverNow - Date.now());
+        if (startedAt !== undefined) setVoiceStartedAt(prev => ({ ...prev, [channelId]: startedAt || null }));
         if (voiceChannelIdRef.current === channelId) {
           const sharing = new Set(participants.filter(p => p.screenSharing).map(p => p.socketId));
           const started = [...sharing].some(sid => sid !== socket.id && !screenSharersRef.current.has(sid));
@@ -1540,7 +1547,10 @@ function App() {
                     <Signal size={15} /> Voz conectada
                     {voicePing !== null && <span className="voice-ping">{voicePing} ms</span>}
                   </strong>
-                  <small>{vch ? `${vch.name} / ${vch.serverName}` : 'Sala'}</small>
+                  <small className="voice-status-where">
+                    <span>{vch ? `${vch.name} / ${vch.serverName}` : 'Sala'}</span>
+                    <CallTimer startedAt={voiceStartedAt[voiceChannelId]} offset={serverClockOffset} className="call-timer voice-status-timer" />
+                  </small>
                 </div>
                 <button className="icon-btn voice-leave" title="Desconectar" onClick={leaveVoice}>
                   <PhoneOff size={18} />
@@ -1612,6 +1622,8 @@ function App() {
           channelId={voiceChannelId}
           channelName={(servers.flatMap(sv => sv.channels || []).find(c => c.id === voiceChannelId) || {}).name || 'Sala'}
           people={callPeople}
+          callStartedAt={voiceStartedAt[voiceChannelId]}
+          clockOffset={serverClockOffset}
           remoteVideos={remoteVideos}
           localCameraStream={localCameraStream}
           localScreenStream={localScreenStream}

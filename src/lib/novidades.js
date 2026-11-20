@@ -3,46 +3,60 @@
 // (a versão em que entraram). Imagens ficam em public/novidades/<versão>/.
 // Versões comparam como texto: "2026-11-19" < "2026-11-19b" < "2026-11-20".
 export const NOVIDADES = {
-  version: '2026-11-20',
+  version: '2026-11-20b',
   date: '20 de novembro de 2026',
   items: [
     {
+      title: 'Tempo de call ⏱️',
+      text: 'A call mostra há quanto tempo está rolando, no quadro de **Voz conectada** e no topo da sala. Conta desde que a primeira pessoa entrou e zera quando a call esvazia.'
+    },
+    {
+      since: '2026-11-20',
       title: 'Jogos na call 🚀',
       text: 'Botão de **foguete** na barra da call: **GeoGuessr** e **Truco** (paulista ou mineiro, 1x1, 2x2 ou de 3). Quem inicia chama, os outros recebem o convite e entram se quiserem.'
     },
     {
+      since: '2026-11-20',
       title: 'Quem tá assistindo 👁️',
       text: 'Na stream aparece quem está assistindo, e do lado do AO VIVO fica o número.'
     },
     {
+      since: '2026-11-20',
       title: 'Janelinha da stream',
       text: 'Saiu da sala pra um canal de texto ou DM? A stream continua numa janelinha no canto, igual o Discord. Arraste pra mudar de lugar e clique pra voltar pra sala.'
     },
     {
+      since: '2026-11-20',
       title: 'Stream grande em cima',
       text: 'Com alguém transmitindo, a tela fica grande em cima e o pessoal numa fileira embaixo. Arraste a divisa pra fileira ficar maior ou menor.'
     },
     {
+      since: '2026-11-20',
       title: 'Enquete 📊',
       text: 'Botão de gráfico do lado do GIF, ou digite **/poll**. Cada um vota uma vez e dá pra trocar o voto.'
     },
     {
+      since: '2026-11-20',
       title: 'Figurinhas',
       text: 'No botão **GIF**, a aba **Figurinhas** busca figurinhas animadas.'
     },
     {
+      since: '2026-11-20',
       title: 'Configurações novas ⚙️',
       text: 'Tudo numa tela só, igual o Discord: conta, perfil (com prévia ao vivo), clã, tema, voz e vídeo (saída de áudio e câmera), notificações e volume dos sons.'
     },
     {
+      since: '2026-11-20',
       title: 'Amigos de verdade',
       text: 'Pedido de amizade chega na hora, com aviso no ícone de início. Dá pra adicionar clicando no perfil da pessoa.'
     },
     {
+      since: '2026-11-20',
       title: 'Notificação com o app fechado',
       text: 'Ligue em Configurações > Notificações: DM, menção e /aviso chegam mesmo com o RONNCORD fechado.'
     },
     {
+      since: '2026-11-20',
       title: 'Call mais firme',
       text: 'Se a internet piscar, você volta pra call sozinho e não fica "congelado" (mutado e falando) na lista dos outros.'
     },

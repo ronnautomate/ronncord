@@ -6,6 +6,7 @@ import {
 import { resolveAssetUrl } from '../lib/api.js';
 import { SCREEN_QUALITIES } from '../lib/voiceManager.js';
 import { useActivities, ActivitiesButton, ActivitiesPanel, ActivityInvites, ActivityStage } from './activities/index.js';
+import { CallTimer } from './CallTimer.jsx';
 
 // ============================================================
 //  SALA DE VOZ (layout trazido do discordia)
@@ -81,6 +82,8 @@ function goFullscreen(el) {
 
 export function CallStage({
   channelName,
+  callStartedAt,       // início da call (relógio do servidor) e a diferença de relógio, pro tempo de call
+  clockOffset,
   people,              // [{ socketId, userId, name, avatarUrl, color, deco, speaking, muted, deafened, isMe }]
   remoteVideos,        // do voiceManager: { id, socketId, kind: 'camera'|'screen', stream }
   localCameraStream,
@@ -342,7 +345,7 @@ export function CallStage({
           )}
           <Volume2 size={20} className="header-icon" />
           <strong>{channelName}</strong>
-          <span className="chat-topic">{people.length} na sala</span>
+          <span className="chat-topic">{people.length} na sala<CallTimer startedAt={callStartedAt} offset={clockOffset} className="call-timer call-header-timer" /></span>
         </div>
       </header>
 

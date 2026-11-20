@@ -118,3 +118,10 @@
 }
 .user-popout-friend.done { background: var(--bg-input); color: var(--text-muted); cursor: default; }
 .server-rail .server-logo > .rail-dm-badge { pointer-events: none; }
+
+/* ===== tempo de call (20/11/2026) ===== */
+.call-timer { font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.voice-status-bar.discord small.voice-status-where { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.voice-status-where > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.voice-status-timer { margin-left: auto; flex-shrink: 0; font-size: 12px; }
+.call-header-timer::before { content: '•'; margin: 0 6px; opacity: .6; }

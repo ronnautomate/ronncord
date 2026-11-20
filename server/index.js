@@ -425,7 +425,7 @@ app.patch('/api/auth/profile', authMiddleware, async (req, res) => {
       }
     }
     if (changed) {
-      io.emit('voice:participants', { channelId: chId, participants: Array.from(room.values()) });
+      io.emit('voice:participants', roomPayload(chId, room));
     }
   }
   res.json({ user: updated });
@@ -435,15 +435,17 @@ app.patch('/api/auth/profile', authMiddleware, async (req, res) => {
 app.get('/api/servers', authMiddleware, async (req, res) => {
   const servers = await getFullServersForUser(req.user.id);
   const voiceParticipants = {};
+  const voiceStartedAt = {};
   for (const s of servers) {
     for (const ch of s.channels) {
       const room = voiceRooms.get(ch.id);
       if (room && room.size > 0) {
         voiceParticipants[ch.id] = Array.from(room.values());
+        voiceStartedAt[ch.id] = callStartedAt(ch.id, room);
       }
     }
   }
-  res.json({ servers, voiceParticipants });
+  res.json({ servers, voiceParticipants, voiceStartedAt, serverNow: Date.now() });
 });
 
 app.post('/api/servers', authMiddleware, async (req, res) => {
@@ -1048,6 +1050,34 @@ app.delete('/api/notes/:id', authMiddleware, async (req, res) => {
 
 // Socket.IO Real-Time + Voice Signaling + Music Bot
 const voiceRooms = new Map();
+
+// Tempo de call (igual Discord): conta desde que a 1ª pessoa entrou e todo mundo vê o mesmo relógio.
+// Esvaziou, zera. Respiro de 30 s pra queda de internet/F5 de quem tá sozinho não zerar o tempo.
+const voiceCallStart = new Map(); // channelId -> { startedAt, emptySince }
+const CALL_EMPTY_GRACE_MS = Number(process.env.CALL_EMPTY_GRACE_MS) || 30000;
+function callStartedAt(channelId, room) {
+  const now = Date.now();
+  const size = room ? room.size : 0;
+  let st = voiceCallStart.get(channelId);
+  if (size === 0) {
+    if (st && !st.emptySince) st.emptySince = now;
+    return null;
+  }
+  if (!st || (st.emptySince && now - st.emptySince > CALL_EMPTY_GRACE_MS)) {
+    st = { startedAt: now, emptySince: null };
+    voiceCallStart.set(channelId, st);
+  }
+  st.emptySince = null;
+  return st.startedAt;
+}
+function roomPayload(channelId, room) {
+  return {
+    channelId,
+    participants: Array.from(room ? room.values() : []),
+    startedAt: callStartedAt(channelId, room),
+    serverNow: Date.now()
+  };
+}
 const musicRooms = new Map(); // channelId -> { queue: [{ id, title, url, requestedBy }], playing: boolean, currentIndex: number, startedAt: number }
 
 const MUSIC_PRESETS = [
@@ -1101,7 +1131,7 @@ io.on('connection', async (socket) => {
       if (room.size > 0) {
         const ch = await db.get('SELECT server_id FROM channels WHERE id = ?', chId);
         if (ch && allowedServers.has(ch.server_id)) {
-          socket.emit('voice:participants', { channelId: chId, participants: Array.from(room.values()) });
+          socket.emit('voice:participants', roomPayload(chId, room));
         }
       }
     }
@@ -1158,7 +1188,7 @@ io.on('connection', async (socket) => {
           changed = true;
         }
       }
-      if (changed) io.emit('voice:participants', { channelId: prevChId, participants: Array.from(prevRoom.values()) });
+      if (changed) io.emit('voice:participants', roomPayload(prevChId, prevRoom));
     }
 
     if (!voiceRooms.has(channelId)) voiceRooms.set(channelId, new Map());
@@ -1181,7 +1211,7 @@ io.on('connection', async (socket) => {
     socket.join(`voice:${channelId}`);
 
     socket.emit('voice:peers', { channelId, peers: existingPeers });
-    io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
+    io.emit('voice:participants', roomPayload(channelId, room));
     const mState = musicRooms.get(channelId);
     if (mState) socket.emit('music:state', { channelId, ...mState });
   });
@@ -1250,14 +1280,14 @@ io.on('connection', async (socket) => {
       ...(screenSharing !== undefined ? { screenSharing: Boolean(screenSharing) } : {})
     };
     room.set(socket.id, updated);
-    io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
+    io.emit('voice:participants', roomPayload(channelId, room));
   });
 
   socket.on('voice:leave', (channelId) => {
     const room = voiceRooms.get(channelId);
     if (room) {
       room.delete(socket.id);
-      io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
+      io.emit('voice:participants', roomPayload(channelId, room));
     }
     socket.leave(`voice:${channelId}`);
   });
@@ -1277,7 +1307,7 @@ io.on('connection', async (socket) => {
     for (const [channelId, room] of voiceRooms.entries()) {
       if (room.has(socket.id)) {
         room.delete(socket.id);
-        io.emit('voice:participants', { channelId, participants: Array.from(room.values()) });
+        io.emit('voice:participants', roomPayload(channelId, room));
       }
     }
     // só fica offline quando fecha a ÚLTIMA aba/aparelho; o status escolhido (Ausente, Não Perturbe) não é apagado.
