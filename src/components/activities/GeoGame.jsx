@@ -51,7 +51,23 @@ const kmTxt = km => (km < 1 ? `${Math.round(km * 1000)} m` : km < 100 ? `${km.to
 const celular = () => window.matchMedia?.('(max-width: 640px)').matches || /Mobi|Android|iPhone/i.test(navigator.userAgent);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const corOk = c => (/^#[0-9a-f]{3,8}$/i.test(c || '') ? c : '#5865F2');
-const tileLayer = () => window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' });
+// mapa igual o do GeoGuessr (Google), com os nomes no idioma escolhido no jogo (português ou inglês)
+export const geoLingua = () => (localStorage.getItem('ronncord_geo_lingua') === 'en' ? 'en' : 'pt');
+const urlMapa = () => `https://mt{s}.google.com/vt/lyrs=m&hl=${geoLingua() === 'en' ? 'en' : 'pt-BR'}&x={x}&y={y}&z={z}`;
+const camadas = new Set();
+if (typeof window !== 'undefined') {
+  window.addEventListener('geo-lingua', () => camadas.forEach(c => { try { c.setUrl(urlMapa()); } catch { camadas.delete(c); } }));
+}
+const tileLayer = () => {
+  const c = window.L.tileLayer(urlMapa(), { maxZoom: 19, subdomains: '0123', attribution: '© Google' });
+  camadas.add(c);
+  c.on('remove', () => camadas.delete(c));
+  return c;
+};
+// nome do país no idioma escolhido (quando a lista de dicas não tem o país)
+export function nomePais(cc) {
+  try { return new Intl.DisplayNames([geoLingua() === 'en' ? 'en' : 'pt-BR'], { type: 'region' }).of(cc); } catch { return cc; }
+}
 function pinIcon(p) {
   const dentro = p.avatarUrl ? `<img src="${esc(resolveAssetUrl(p.avatarUrl))}" alt="">` : esc((p.name || '?')[0].toUpperCase());
   return window.L.divIcon({ className: '', html: `<div class="geo-pino" style="background:${corOk(p.color)}" title="${esc(p.name)}">${dentro}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
@@ -134,7 +150,10 @@ function GeoLobby({ act, g }) {
           ) : dentro ? (
             <p className="act-vazio">Você entrou. {act.person(g.host, g).name} começa quando quiser.</p>
           ) : (
-            <button type="button" className="act-btn verde grande" onClick={() => act.join('geo')}>Entrar</button>
+            <>
+              <button type="button" className="act-btn verde grande" onClick={() => act.join('geo')}>Entrar</button>
+              <p className="act-vazio act-pouco">Ou só assista: você vê as fotos e os resultados sem jogar, e pode entrar quando quiser.</p>
+            </>
           )}
           <h3>🏆 Ranking da semana</h3>
           <GeoRanking act={act} />
@@ -198,6 +217,10 @@ function GeoRound({ act, g }) {
     const L = window.L;
     const map = L.map(mapDiv.current, { worldCopyJump: true, zoomControl: true }).setView([20, 0], 1);
     tileLayer().addTo(map);
+    // o minimapa cresce quando passa o mouse (igual GeoGuessr): ajusta o mapa no fim da animação
+    const caixaMapa = mapDiv.current.closest('.geo-mapa-caixa');
+    const ajustar = () => map.invalidateSize();
+    caixaMapa?.addEventListener('transitionend', ajustar);
     const eu = act.person(act.myId, g);
     map.on('click', e => {
       const m = meuRef.current;
@@ -208,7 +231,7 @@ function GeoRound({ act, g }) {
       setChute(ll);
     });
     mapRef.current = map;
-    return () => { map.remove(); mapRef.current = null; pinRef.current = null; };
+    return () => { caixaMapa?.removeEventListener('transitionend', ajustar); map.remove(); mapRef.current = null; pinRef.current = null; };
   }, []);
   useEffect(() => {
     localStorage.setItem('ronncord_geo_mapa', tam);
@@ -228,7 +251,7 @@ function GeoRound({ act, g }) {
         caixa.innerHTML = '';
         viewer = window.pannellum.viewer(caixa, {
           type: 'equirectangular', panorama: url, autoLoad: true, crossOrigin: 'anonymous', hfov: 100,
-          showFullscreenCtrl: false, compass: false, keyboardZoom: false, yaw: Math.random() * 360 - 180,
+          showFullscreenCtrl: false, compass: Number(l.az) > 0, northOffset: Number(l.az) || 0, keyboardZoom: false, yaw: Math.random() * 360 - 180,
           strings: {
             loadingLabel: 'Carregando a foto...', genericWebGLError: 'Seu navegador não abriu a foto 360°.', iOS8WebGLError: 'Seu navegador não abriu a foto 360°.',
             textureSizeError: 'Foto grande demais pra sua placa de vídeo.', unknownError: 'A foto não abriu 😕', loadButtonLabel: 'Abrir foto', bylineLabel: ''
@@ -279,8 +302,10 @@ function GeoRound({ act, g }) {
           createTooltipFunc: div => { div.innerHTML = '<span>▲</span>'; div.title = 'Andar pra cá'; },
           clickHandlerFunc: () => andar(v.id)
         }));
+        const temBussola = ehPx || ehExtra || Number(l.az) > 0;
         const cena = (cur, url) => ({
-          type: 'equirectangular', panorama: url, hfov: 100, hotSpots: setas(cur), crossOrigin: 'anonymous'
+          type: 'equirectangular', panorama: url, hfov: 100, hotSpots: setas(cur), crossOrigin: 'anonymous',
+          northOffset: cur.az || 0
         });
         let atual = null, andando = false;
         const andar = async id => {
@@ -311,7 +336,7 @@ function GeoRound({ act, g }) {
           caixa.innerHTML = '';
           const url0 = alta && cur.hd ? cur.hd : (cur.sd || l.img);
           viewer = window.pannellum.viewer(caixa, {
-            default: { firstScene: pxId, autoLoad: true, showFullscreenCtrl: false, compass: false, keyboardZoom: false, sceneFadeDuration: 400,
+            default: { firstScene: pxId, autoLoad: true, showFullscreenCtrl: false, compass: temBussola, keyboardZoom: false, sceneFadeDuration: 400,
               strings: { loadingLabel: 'Carregando a foto...', unknownError: 'A foto não abriu 😕', bylineLabel: '' } },
             scenes: { [pxId]: { ...cena(cur, url0), yaw: Math.random() * 360 - 180 } }
           });
@@ -363,6 +388,7 @@ function GeoRound({ act, g }) {
       <ActTop act={act} kind="geo">
         <span className={`geo-relogio ${s !== null && s <= 10 ? 'pouco' : ''}`}>{s === null ? 'sem limite' : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`}</span>
         <b className="geo-rodada">Rodada {g.rodada + 1}/{g.total}</b>
+        {!jogador && <span className="act-tag">👁 assistindo</span>}
         <span className="geo-quem">
           {g.jogadores.map(id => (
             <ActAvatar key={id} person={act.person(id, g)} size={24} className={g.chutaram.includes(id) ? 'chutou' : 'esperando'} />
@@ -443,16 +469,20 @@ function GeoResult({ act, g }) {
       <ActTop act={act} kind="geo"><b className="geo-rodada">Rodada {g.rodada + 1}/{g.total}</b></ActTop>
       <div className="geo-resultado gg">
         <div className="geo-mapa" ref={mapDiv} />
-        {l?.pais && verDica && (
+        {l?.cc && verDica && (
           <div className="geo-dica gg-dica">
             <button type="button" className="gg-x" onClick={() => setVerDica(false)} title="Esconder dica">×</button>
             <div className="pais">
               {/^[A-Z]{2}$/.test(l.cc) && <img src={`https://flagcdn.com/w80/${l.cc.toLowerCase()}.png`} alt="" />}
-              {l.pais.n}
+              {geoLingua() === 'en' || !l.pais ? nomePais(l.cc) : l.pais.n}
             </div>
-            <small>perto de {l.perto}</small>
-            <b className="titulo">Como acertar da próxima</b>
-            <p>{l.pais.d}</p>
+            {l.perto && <small>{geoLingua() === 'en' ? 'near' : 'perto de'} {l.perto}</small>}
+            {l.pais?.d && (
+              <>
+                <b className="titulo">Como acertar da próxima</b>
+                <p>{l.pais.d}</p>
+              </>
+            )}
           </div>
         )}
         <div className="gg-painel">
