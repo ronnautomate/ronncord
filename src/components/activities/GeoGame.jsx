@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { apiFetch, resolveAssetUrl } from '../../lib/api.js';
 import { ActAvatar, ActTop } from './common.jsx';
+import { SoundFX } from '../../lib/soundEffects.js';
 
 // ============================================================
 //  GEOGUESSR na call: todo mundo que entrou vê a mesma foto de rua e chuta no mapa.
@@ -134,6 +135,7 @@ function GeoRound({ act, g }) {
   const mapRef = useRef(null);
   const pinRef = useRef(null);
   const enviadoRef = useRef(false);
+  const contouRef = useRef(false);
   const jogador = g.jogadores.includes(act.myId);
   const jaChutei = g.chutaram.includes(act.myId) || enviadoRef.current;
   const meuRef = useRef({ jogador, jaChutei, chute });
@@ -145,6 +147,9 @@ function GeoRound({ act, g }) {
     const t = setInterval(() => {
       setAgora(Date.now());
       const m = meuRef.current;
+      // faltando uns 4 segundos: toca a contagem do GeoGuessr (uma vez por rodada)
+      const falta = fimRef.current ? fimRef.current - Date.now() : 0;
+      if (!contouRef.current && falta > 0 && falta <= 4100) { contouRef.current = true; SoundFX.geoCountdown(); }
       // acabando o tempo: quem marcou no mapa e não confirmou, vai assim mesmo
       if (fimRef.current && Date.now() >= fimRef.current - 800 && m.chute && !m.jaChutei && m.jogador) enviar(m.chute);
     }, 250);
