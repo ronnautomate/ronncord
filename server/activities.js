@@ -131,7 +131,9 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
     try { viz = typeof r.viz === 'string' ? JSON.parse(r.viz || '[]') : (r.viz || []); } catch { viz = []; }
     const l = { id: r.id, lat: r.lat, lon: r.lon, img: r.img, p360: Boolean(r.p360), cc: r.cc, perto: r.perto || '', extra: true, az: Number(r.az) || 0, viz, anda: viz.length > 0 };
     EXTRA_NOS.set(l.id, l);
-    if (r.inicio === 0 || r.inicio === false || GEO_POR_ID.has(l.id)) return;
+    const velho = GEO_POR_ID.get(l.id);
+    if (velho) { Object.assign(velho, l); return; } // mandou de novo (nome/rumo corrigido): atualiza na hora
+    if (r.inicio === 0 || r.inicio === false) return;
     GEO.locais.push(l);
     GEO_POR_ID.set(l.id, l);
   }

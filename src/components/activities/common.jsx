@@ -34,6 +34,7 @@ function GameSound({ kind }) {
   const [aberto, setAberto] = useState(false);
   const [vol, setVol] = useState(getGameVolume);
   const [contagem, setContagem] = useState(() => localStorage.getItem('ronncord_game_contagem') !== 'off');
+  const [lingua, setLingua] = useState(() => (localStorage.getItem('ronncord_geo_lingua') === 'en' ? 'en' : 'pt'));
   const ref = useRef(null);
   useEffect(() => {
     if (!aberto) return;
@@ -43,12 +44,12 @@ function GameSound({ kind }) {
   }, [aberto]);
   return (
     <div className="act-som" ref={ref}>
-      <button type="button" className="act-btn" title="Som do jogo" onClick={() => setAberto(v => !v)}>
+      <button type="button" className="act-btn" title="Som e idioma do jogo" onClick={() => setAberto(v => !v)}>
         {vol === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
       </button>
       {aberto && (
         <div className="act-som-pop">
-          <b>Som do jogo</b>
+          <b>Opções do jogo</b>
           <label>
             <span>Efeitos <i>{vol}%</i></span>
             <input
@@ -57,6 +58,16 @@ function GameSound({ kind }) {
               onPointerUp={() => kind === 'geo' && SoundFX.geo('chutou')}
             />
           </label>
+          {kind === 'geo' && (
+            <div className="act-lingua">
+              <span>Idioma do mapa</span>
+              <div>
+                {[['pt', 'Português'], ['en', 'English']].map(([v, r]) => (
+                  <button key={v} type="button" className={lingua === v ? 'ativo' : ''} onClick={() => { setLingua(v); localStorage.setItem('ronncord_geo_lingua', v); window.dispatchEvent(new Event('geo-lingua')); }}>{r}</button>
+                ))}
+              </div>
+            </div>
+          )}
           {kind === 'geo' && (
             <label className="act-som-check">
               <input type="checkbox" checked={contagem} onChange={e => { setContagem(e.target.checked); localStorage.setItem('ronncord_game_contagem', e.target.checked ? 'on' : 'off'); }} />

@@ -117,6 +117,7 @@ export function ActivityInvites({ act }) {
         </div>
         <span className="act-faces">{quem.slice(0, 5).map(id => <ActAvatar key={id} person={act.person(id, g)} size={24} />)}</span>
         <button type="button" className="act-btn verde" onClick={() => (botao === 'Assistir' ? act.watch(a.kind) : act.join(a.kind))}>{botao}</button>
+        {a.kind === 'geo' && <button type="button" className="act-btn" title="Vê o jogo sem jogar (dá pra entrar depois)" onClick={() => act.watch(a.kind)}>Assistir</button>}
         <button type="button" className="act-btn" onClick={() => act.dismiss(g.id)}>Agora não</button>
       </div>
     );
