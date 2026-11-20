@@ -210,14 +210,20 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
     const tempo = [60, 90, 120, 0].includes(Number(opts.tempo)) ? Number(opts.tempo) : 90;
     return {
       kind: 'geo', id: crypto.randomUUID(), channelId, host: user.id, fase: 'sala', total, tempo, rodada: -1,
+      regiao: opts.regiao === 'br' ? 'br' : 'mundo', // 'mundo' (1 lugar por país) ou 'br' (só fotos do Brasil)
       jogadores: [user.id], placar: { [user.id]: 0 }, chutaram: [], local: null, resultado: null, fimEm: 0,
       nomes: { [user.id]: perfil(user) }, priv: { locais: [], chutes: {}, timer: null, jogaram: new Set([user.id]) }
     };
   }
   function geoComecar(g) {
-    const lista = shuffle(GEO.locais.filter(l => !GEO_MORTOS.has(l.id)));
-    const escolhidos = [], paises = new Set(); // um local por país
-    for (const l of lista) if (escolhidos.length < g.total && !paises.has(l.cc)) { escolhidos.push(l.id); paises.add(l.cc); }
+    const soBr = g.regiao === 'br';
+    const lista = shuffle(GEO.locais.filter(l => !GEO_MORTOS.has(l.id) && (!soBr || l.cc === 'BR')));
+    const escolhidos = [], paises = new Set(); // mundo: um local por país; só Brasil: lugares diferentes
+    for (const l of lista) {
+      if (escolhidos.length >= g.total) break;
+      if (!soBr && paises.has(l.cc)) continue;
+      escolhidos.push(l.id); paises.add(l.cc);
+    }
     g.priv.locais = escolhidos;
     g.total = escolhidos.length;
     g.rodada = -1;
@@ -302,6 +308,7 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
       if (!host || g.fase !== 'sala') return;
       if ([3, 5, 10].includes(Number(m.rodadas))) g.total = Number(m.rodadas);
       if ([60, 90, 120, 0].includes(Number(m.tempo))) g.tempo = Number(m.tempo);
+      if (m.regiao === 'br' || m.regiao === 'mundo') g.regiao = m.regiao;
       return emitir(g);
     }
     if (m.a === 'comecar') {

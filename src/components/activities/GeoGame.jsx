@@ -111,6 +111,8 @@ function GeoLobby({ act, g }) {
       <div className="act-meio">
         <div className="act-cartao">
           <p className="act-explica">Todo mundo que entrou vê a mesma foto de rua e marca no mapa onde acha que é. Quanto mais perto, mais pontos (até 5.000 por rodada). Depois de cada rodada vem uma dica de como reconhecer aquele país.</p>
+          <h3>Lugares</h3>
+          {op('regiao', ['mundo', 'br'], v => (v === 'br' ? '🇧🇷 Só Brasil' : '🌎 Mundo todo'), g.regiao || 'mundo')}
           <h3>Rodadas</h3>
           {op('rodadas', [3, 5, 10], v => v, g.total)}
           <h3>Tempo por rodada</h3>
