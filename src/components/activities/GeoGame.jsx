@@ -72,6 +72,28 @@ function pinIcon(p) {
   const dentro = p.avatarUrl ? `<img src="${esc(resolveAssetUrl(p.avatarUrl))}" alt="">` : esc((p.name || '?')[0].toUpperCase());
   return window.L.divIcon({ className: '', html: `<div class="geo-pino" style="background:${corOk(p.color)}" title="${esc(p.name)}">${dentro}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
 }
+// bússola em faixa (igual GeoGuessr): letras e risquinhos deslizando conforme gira
+const PONTOS = { 0: 'N', 45: 'NE', 90: 'L', 135: 'SE', 180: 'S', 225: 'SO', 270: 'O', 315: 'NO' };
+const PONTOS_EN = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
+function Bussola({ rumo }) {
+  const PX = 2.4; // pixels por grau
+  const nomes = (localStorage.getItem('ronncord_geo_lingua') === 'en') ? PONTOS_EN : PONTOS;
+  const marcas = [];
+  for (let d = -180; d <= 540; d += 15) {
+    const n = ((d % 360) + 360) % 360;
+    marcas.push(
+      <span key={d} className={`gg-marca ${nomes[n] ? 'letra' : ''} ${n === 0 ? 'norte' : ''}`} style={{ left: `${(d + 180) * PX}px` }}>
+        {nomes[n] || ''}
+      </span>
+    );
+  }
+  return (
+    <div className="gg-bussola">
+      <div className="gg-faixa" style={{ transform: `translateX(${-(rumo + 180) * PX}px)` }}>{marcas}</div>
+    </div>
+  );
+}
+
 // número que sobe animado (igual a contagem de pontos do GeoGuessr)
 function useContagem(alvo, atraso = 700, dur = 1400) {
   const [v, setV] = useState(0);
@@ -176,6 +198,21 @@ function GeoRound({ act, g }) {
   const pinRef = useRef(null);
   const enviadoRef = useRef(false);
   const contouRef = useRef(false);
+  const viewerRef = useRef(null);   // visor 360 (pra HUD: bússola, zoom)
+  const jogoRef = useRef(null);
+  const azRef = useRef(null);       // pra onde aponta o centro da foto atual (null = não sabe: sem bússola)
+  const voltarRef = useRef(null);   // volta ao começo (quando dá pra andar)
+  const [rumo, setRumo] = useState(null);
+  const [podeVoltar, setPodeVoltar] = useState(false);
+  // bússola: lê pra onde a pessoa está olhando e mostra na faixa do topo
+  useEffect(() => {
+    const t = setInterval(() => {
+      const v = viewerRef.current;
+      if (!v || azRef.current === null) return setRumo(null);
+      try { setRumo(((v.getYaw() + azRef.current) % 360 + 360) % 360); } catch { /* visor trocando */ }
+    }, 60);
+    return () => clearInterval(t);
+  }, []);
   const jogador = g.jogadores.includes(act.myId);
   const jaChutei = g.chutaram.includes(act.myId) || enviadoRef.current;
   const meuRef = useRef({ jogador, jaChutei, chute });
@@ -250,14 +287,16 @@ function GeoRound({ act, g }) {
         try { viewer?.destroy(); } catch { /* já foi */ }
         caixa.innerHTML = '';
         viewer = window.pannellum.viewer(caixa, {
-          type: 'equirectangular', panorama: url, autoLoad: true, crossOrigin: 'anonymous', hfov: 100,
-          showFullscreenCtrl: false, compass: Number(l.az) > 0, northOffset: Number(l.az) || 0, keyboardZoom: false, yaw: Math.random() * 360 - 180,
+          type: 'equirectangular', panorama: url, autoLoad: true, crossOrigin: 'anonymous', hfov: 100, showZoomCtrl: false,
+          showFullscreenCtrl: false, compass: false, keyboardZoom: false, yaw: Math.random() * 360 - 180,
           strings: {
             loadingLabel: 'Carregando a foto...', genericWebGLError: 'Seu navegador não abriu a foto 360°.', iOS8WebGLError: 'Seu navegador não abriu a foto 360°.',
             textureSizeError: 'Foto grande demais pra sua placa de vídeo.', unknownError: 'A foto não abriu 😕', loadButtonLabel: 'Abrir foto', bylineLabel: ''
           }
         });
         viewer.on('error', () => { if (vivo && reserva) usar(reserva, null); });
+        viewerRef.current = viewer;
+        azRef.current = Number(l.az) > 0 ? Number(l.az) : null;
       };
       const alta = !celular() && l.hd;
       // dá pra andar: fotos do Panoramax (sequência deles) ou fotos extras que vieram com a sequência (nosso servidor)
@@ -299,7 +338,7 @@ function GeoRound({ act, g }) {
         const norm = v => ((v + 540) % 360) - 180;
         const setas = cur => cur.viz.map(v => ({
           pitch: -12, yaw: norm(rumo(cur, v) - cur.az), type: 'custom', cssClass: 'geo-seta',
-          createTooltipFunc: div => { div.innerHTML = '<span>▲</span>'; div.title = 'Andar pra cá'; },
+          createTooltipFunc: div => { div.innerHTML = '<svg viewBox="0 0 60 30"><path d="M6 26 L30 6 L54 26" /></svg>'; div.title = 'Andar pra cá'; },
           clickHandlerFunc: () => andar(v.id)
         }));
         const temBussola = ehPx || ehExtra || Number(l.az) > 0;
@@ -318,7 +357,8 @@ function GeoRound({ act, g }) {
             if (!viewer.getConfig().scenes?.[id]) viewer.addScene(id, cena(prox, prox.sd || prox.hd));
             viewer.loadScene(id, viewer.getPitch(), norm(rumoAgora - prox.az), viewer.getHfov());
             atual = prox;
-            voltar.hidden = id === inicioId;
+            azRef.current = prox.az;
+            setPodeVoltar(id !== inicioId);
           } catch { /* a foto vizinha não abriu: fica onde está */ }
           andando = false;
         };
@@ -329,6 +369,7 @@ function GeoRound({ act, g }) {
         voltar.textContent = '↩ Voltar ao começo';
         voltar.hidden = true;
         voltar.onclick = () => andar(inicioId);
+        voltarRef.current = () => andar(inicioId);
         info(pxId).then(cur => {
           if (!vivo) return;
           atual = cur;
@@ -336,12 +377,13 @@ function GeoRound({ act, g }) {
           caixa.innerHTML = '';
           const url0 = alta && cur.hd ? cur.hd : (cur.sd || l.img);
           viewer = window.pannellum.viewer(caixa, {
-            default: { firstScene: pxId, autoLoad: true, showFullscreenCtrl: false, compass: temBussola, keyboardZoom: false, sceneFadeDuration: 400,
+            default: { firstScene: pxId, autoLoad: true, showFullscreenCtrl: false, showZoomCtrl: false, compass: false, keyboardZoom: false, sceneFadeDuration: 400,
               strings: { loadingLabel: 'Carregando a foto...', unknownError: 'A foto não abriu 😕', bylineLabel: '' } },
             scenes: { [pxId]: { ...cena(cur, url0), yaw: Math.random() * 360 - 180 } }
           });
           viewer.on('error', () => { if (vivo && url0 !== cur.sd && cur.sd) { try { viewer.destroy(); } catch { /* */ } usar(cur.sd, null); } });
-          caixa.appendChild(voltar);
+          viewerRef.current = viewer;
+          azRef.current = temBussola ? cur.az : null;
         }).catch(() => { if (vivo) usar(alta ? l.hd : l.img, alta ? l.img : null); });
       }
     } else {
@@ -372,7 +414,7 @@ function GeoRound({ act, g }) {
       plana.onclick = e => { const z = plana.classList.toggle('ampliada'); ponto(e); tela.style.transform = z ? 'scale(2.5)' : ''; };
       plana.onmousemove = e => { if (plana.classList.contains('ampliada')) ponto(e); };
     }
-    return () => { vivo = false; try { viewer?.destroy(); } catch { /* já foi */ } caixa.innerHTML = ''; };
+    return () => { vivo = false; viewerRef.current = null; azRef.current = null; voltarRef.current = null; setPodeVoltar(false); try { viewer?.destroy(); } catch { /* já foi */ } caixa.innerHTML = ''; };
   }, [g.local?.id]);
 
   const s = fimRef.current ? Math.max(0, Math.ceil((fimRef.current - agora) / 1000)) : null;
@@ -386,8 +428,6 @@ function GeoRound({ act, g }) {
   return (
     <>
       <ActTop act={act} kind="geo">
-        <span className={`geo-relogio ${s !== null && s <= 10 ? 'pouco' : ''}`}>{s === null ? 'sem limite' : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`}</span>
-        <b className="geo-rodada">Rodada {g.rodada + 1}/{g.total}</b>
         {!jogador && <span className="act-tag">👁 assistindo</span>}
         <span className="geo-quem">
           {g.jogadores.map(id => (
@@ -395,17 +435,44 @@ function GeoRound({ act, g }) {
           ))}
         </span>
       </ActTop>
-      <div className="geo-jogo">
+      <div className="geo-jogo" ref={jogoRef}>
         <div className="geo-foto" ref={fotoDiv} />
         {fotoMsg && <div className="geo-carregando">{fotoMsg}</div>}
-        <div className={`geo-mapa-caixa ${tam}`}>
-          <div className="geo-mapa" ref={mapDiv} />
-          <div className="geo-mapa-acoes">
-            {[['p', 'P', 'Mapa pequeno'], ['m', 'M', 'Mapa médio'], ['g', 'G', 'Mapa grande']].map(([t, r, tt]) => (
-              <button key={t} type="button" data-tam={t} className={`act-btn tam ${tam === t ? 'ativo' : ''}`} title={tt} onClick={() => setTam(t)}>{r}</button>
-            ))}
-            <button type="button" className={`act-btn ${botao.cls} geo-chutar`} disabled={botao.dis} onClick={botao.on || undefined}>{botao.txt}</button>
+
+        {/* ===== HUD igual GeoGuessr ===== */}
+        <div className="gg-hud-topo">
+          {rumo !== null && <Bussola rumo={rumo} />}
+          <div className={`gg-relogio ${s !== null && s <= 10 ? 'pouco' : ''}`}>
+            {s === null ? '∞' : `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`}
           </div>
+        </div>
+        {jogador && (
+          <div className="gg-hud-eu">
+            <ActAvatar person={act.person(act.myId, g)} size={44} />
+            <div className="gg-hud-barra"><i style={{ width: `${Math.min(100, ((g.placar[act.myId] || 0) / Math.max(1, g.total * 5000)) * 100)}%` }} /><b>{fmt(g.placar[act.myId] || 0)}</b></div>
+          </div>
+        )}
+        <div className="gg-hud-rodada">Rodada <b>{g.rodada + 1}</b>/{g.total}</div>
+        <div className="gg-hud-lado">
+          <div className="gg-zoom">
+            <button type="button" title="Aproximar" onClick={() => { const v = viewerRef.current; if (v) v.setHfov(Math.max(40, v.getHfov() - 15)); }}>+</button>
+            <button type="button" title="Afastar" onClick={() => { const v = viewerRef.current; if (v) v.setHfov(Math.min(120, v.getHfov() + 15)); }}>−</button>
+          </div>
+          <button type="button" className="gg-redondo" title="Voltar ao começo" disabled={!podeVoltar} onClick={() => voltarRef.current?.()}>↩</button>
+          <button type="button" className="gg-redondo" title="Tela cheia" onClick={() => {
+            const el = jogoRef.current;
+            if (document.fullscreenElement) document.exitFullscreen?.(); else el?.requestFullscreen?.().catch(() => {});
+          }}>⛶</button>
+        </div>
+
+        <div className={`geo-mapa-caixa ${tam}`}>
+          <div className="gg-mapa-tam">
+            <button type="button" title="Mapa maior" onClick={() => setTam(t => (t === 'p' ? 'm' : 'g'))}>↖</button>
+            <button type="button" title="Mapa menor" onClick={() => setTam(t => (t === 'g' ? 'm' : 'p'))}>↘</button>
+            <button type="button" className={tam !== 'p' ? 'ativo' : ''} title={tam !== 'p' ? 'Soltar (volta a crescer só com o mouse)' : 'Fixar grande'} onClick={() => setTam(t => (t === 'p' ? 'm' : 'p'))}>📌</button>
+          </div>
+          <div className="geo-mapa" ref={mapDiv} />
+          <button type="button" className={`gg-chutar ${botao.cls}`} disabled={botao.dis} onClick={botao.on || undefined}>{botao.txt}</button>
         </div>
       </div>
     </>
