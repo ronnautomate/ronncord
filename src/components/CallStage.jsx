@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Volume2, VolumeX, Mic, MicOff, Video, VideoOff, MonitorUp, MonitorOff, Music, Sliders,
-  PhoneOff, Maximize2, MonitorX, Monitor, Headphones, HeadphoneOff, Menu
+  PhoneOff, Maximize2, MonitorX, Monitor, Headphones, HeadphoneOff, Menu, Eye, AudioLines
 } from 'lucide-react';
 import { resolveAssetUrl } from '../lib/api.js';
 import { SCREEN_QUALITIES } from '../lib/voiceManager.js';
+import { Soundboard } from './Soundboard.jsx';
+import { useActivities, ActivitiesButton, ActivitiesPanel, ActivityInvites, ActivityStage } from './activities/index.js';
 
 // ============================================================
 //  SALA DE VOZ (layout trazido do discordia)
@@ -29,7 +31,7 @@ function bestFit(n, W, H) {
   }
   return Math.max(120, Math.floor(best));
 }
-const SIDE_DEFAULT = 200;
+const SIDE_DEFAULT = 150; // altura da fileira de pessoas embaixo da stream
 const readNum = (key, def) => {
   const n = Number(localStorage.getItem(key));
   return Number.isFinite(n) && n > 0 ? n : def;
@@ -109,15 +111,25 @@ export function CallStage({
   screenQualities = {}, // socketId -> 'source' | '720' | '480' (o que eu pedi)
   onScreenQuality,     // (socketId, qualidade)
   onSelectUser,
-  onOpenNav
+  onOpenNav,
+  watchers = {},       // socketId de quem transmite -> [socketIds de quem assiste] (os outros)
+  onWatchingChange,    // (socketId da tela que eu tô vendo | null)
+  soundFlash = {},     // socketId -> emoji do som que a pessoa tocou no soundboard
+  onSoundboard,        // ({ sound | url, emoji, name })
+  onUploadSound,
+  socket,              // socket.io do app (jogos da call)
+  channelId            // id do canal de voz (jogos da call)
 }) {
   const [focusId, setFocusId] = useState(null);
   const [camSize, setCamSize] = useState(420);
-  const [side, setSide] = useState(() => readNum('ronncord_stage_side', SIDE_DEFAULT));
+  const [side, setSide] = useState(() => readNum('ronncord_stage_strip', SIDE_DEFAULT));
   const [menu, setMenu] = useState(null); // { x, y, type: 'voice'|'screen', person, socketId }
   const stageRef = useRef(null);
+  const act = useActivities({ socket, channelId, people });
+  const [boardOpen, setBoardOpen] = useState(false);
+  const gameOn = Boolean(act.open); // um jogo ocupa o palco (no lugar da tela grande)
 
-  useEffect(() => { localStorage.setItem('ronncord_stage_side', String(side)); }, [side]);
+  useEffect(() => { localStorage.setItem('ronncord_stage_strip', String(side)); }, [side]);
 
   // fecha o menu de volume clicando fora ou no Esc
   useEffect(() => {
@@ -146,6 +158,39 @@ export function CallStage({
   const leftScreens = screens.filter(isLeft);
   const focus = visibleScreens.find(s => s.id === focusId) || visibleScreens[0] || null;
 
+  // conta pros outros qual tela eu tô assistindo (a que está grande no palco)
+  const watchingId = !gameOn && focus && !focus.mine ? focus.socketId : null;
+  const sentWatching = useRef(null);
+  const onWatchingRef = useRef(onWatchingChange);
+  onWatchingRef.current = onWatchingChange;
+  useEffect(() => {
+    if (sentWatching.current === watchingId) return;
+    const t = setTimeout(() => { sentWatching.current = watchingId; onWatchingRef.current?.(watchingId); }, 0);
+    return () => clearTimeout(t);
+  }, [watchingId]);
+  useEffect(() => () => { if (sentWatching.current) onWatchingRef.current?.(null); }, []);
+
+  function viewersOf(socketId) {
+    const ids = new Set(watchers[socketId] || []);
+    if (me && watchingId === socketId) ids.add(me.socketId);
+    return [...ids].map(id => bySocket[id]).filter(Boolean);
+  }
+
+  function watchersTag(socketId) {
+    const viewers = viewersOf(socketId);
+    if (!viewers.length) return null;
+    return (
+      <div className="call-watchers" title={`Assistindo: ${viewers.map(v => v.name).join(', ')}`}>
+        <Eye size={13} />
+        <span className="call-watchers-faces">
+          {viewers.slice(0, 4).map(v => <Avatar key={v.socketId} person={v} size={20} />)}
+        </span>
+        {viewers.length > 4 && <span>+{viewers.length - 4}</span>}
+        {viewers.length <= 4 && <span>{viewers.length}</span>}
+      </div>
+    );
+  }
+
   function openMenu(e, type, person, socketId) {
     e.preventDefault();
     e.stopPropagation();
@@ -162,9 +207,10 @@ export function CallStage({
     handle.setPointerCapture(e.pointerId);
     handle.classList.add('dragging');
     document.body.classList.add('dragging-stage');
-    const right = stageRef.current.getBoundingClientRect().right;
-    const width = stageRef.current.clientWidth;
-    const move = ev => setSide(Math.round(Math.max(160, Math.min(right - ev.clientX - 8, width - 16 - 240))));
+    // stream em cima, pessoas numa fileira embaixo: a alça muda a altura da fileira
+    const bottom = stageRef.current.getBoundingClientRect().bottom;
+    const height = stageRef.current.clientHeight;
+    const move = ev => setSide(Math.round(Math.max(80, Math.min(bottom - ev.clientY - 8, height - 16 - 200))));
     const stop = () => {
       handle.classList.remove('dragging');
       document.body.classList.remove('dragging-stage');
@@ -176,7 +222,7 @@ export function CallStage({
   }
 
   // sem tela em foco: mede o espaço e recalcula o tamanho dos blocos (janela, gente entrando/saindo)
-  const tileCount = focus ? 0 : leftScreens.length + people.length;
+  const tileCount = focus || gameOn ? 0 : leftScreens.length + people.length;
   useEffect(() => {
     const el = stageRef.current;
     if (!el || !tileCount) return;
@@ -207,6 +253,7 @@ export function CallStage({
         onContextMenu={e => openMenu(e, 'voice', p)}
       >
         {cam ? <StreamVideo stream={cam} mirror={p.isMe} /> : <Avatar person={p} />}
+        {soundFlash[p.socketId] && <span key={soundFlash[p.socketId]} className="call-sound-flash">{soundFlash[p.socketId]}</span>}
         <div className="call-label">
           <button type="button" className="call-name" onClick={() => onSelectUser?.(p)}>{p.name}</button>
           {volTag(p)}
@@ -237,6 +284,7 @@ export function CallStage({
         onContextMenu={s.mine ? undefined : e => openMenu(e, 'screen', s.person, s.socketId)}
       >
         <StreamVideo stream={s.stream} contain />
+        {watchersTag(s.socketId)}
         <div className="call-label">
           <span>{s.mine ? 'Sua tela' : `${s.person.name} (tela)`}</span>
           {!s.mine && vol !== 100 && <span className="vol">{vol === 0 ? 'mutada' : `${vol}%`}</span>}
@@ -300,16 +348,28 @@ export function CallStage({
         </div>
       </header>
 
+      <ActivityInvites act={act} />
+
       <div
         ref={stageRef}
-        className={`call-stage ${focus ? 'with-screen' : ''}`}
+        className={`call-stage ${focus || gameOn ? 'with-screen' : ''}`}
         style={{ '--cam-size': `${camSize}px`, '--side': `${side}px` }}
       >
         {people.length === 0 && <p className="call-empty">Conectando...</p>}
-        {focus ? (
+        {gameOn ? (
+          <>
+            <ActivityStage act={act} />
+            <div className="call-handle" title="Arraste pra mudar o tamanho da fileira (duplo clique volta ao normal)" onPointerDown={startDrag} onDoubleClick={() => setSide(SIDE_DEFAULT)} />
+            <div className="call-thumbs">
+              {visibleScreens.map(s => screenTile(s, false))}
+              {leftScreens.map(leftTile)}
+              {people.map(personTile)}
+            </div>
+          </>
+        ) : focus ? (
           <>
             {screenTile(focus, true)}
-            <div className="call-handle" title="Arraste pra mudar o tamanho da tela (duplo clique volta ao normal)" onPointerDown={startDrag} onDoubleClick={() => setSide(SIDE_DEFAULT)} />
+            <div className="call-handle" title="Arraste pra mudar o tamanho da fileira (duplo clique volta ao normal)" onPointerDown={startDrag} onDoubleClick={() => setSide(SIDE_DEFAULT)} />
             <div className="call-thumbs">
               {visibleScreens.filter(s => s !== focus).map(s => screenTile(s, false))}
               {leftScreens.map(leftTile)}
@@ -325,7 +385,7 @@ export function CallStage({
       </div>
 
       <div className="call-bar">
-        {focus && (
+        {focus && !gameOn && (
           <button type="button" className="call-leave-stream" onClick={() => onLeaveStream(focus.id)} title={focus.mine ? 'Some da sua tela, os outros continuam vendo' : 'Para de assistir e continua na call'}>
             <MonitorX size={18} /> {focus.mine ? 'Esconder minha tela' : 'Sair da stream'}
           </button>
@@ -345,12 +405,22 @@ export function CallStage({
         <button type="button" className={musicPlaying ? 'on' : ''} title="RonnBot Música" onClick={onOpenMusic}>
           <Music size={22} />
         </button>
+        <ActivitiesButton act={act} />
+        {onSoundboard && (
+          <div className="soundboard-wrap">
+            <button type="button" className={boardOpen ? 'on' : ''} title="Soundboard" onClick={e => { e.stopPropagation(); setBoardOpen(v => !v); }}>
+              <AudioLines size={22} />
+            </button>
+            {boardOpen && <Soundboard onPlay={onSoundboard} onUpload={onUploadSound} onClose={() => setBoardOpen(false)} />}
+          </div>
+        )}
         <button type="button" title="Configurações de voz" onClick={onOpenSettings}>
           <Sliders size={22} />
         </button>
         <button type="button" className="leave" title="Sair da call" onClick={onLeave}>
           <PhoneOff size={22} />
         </button>
+        <ActivitiesPanel act={act} />
       </div>
 
       {menu && (
