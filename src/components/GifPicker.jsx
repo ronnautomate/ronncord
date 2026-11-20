@@ -31,7 +31,8 @@ function pickFile(item, size) {
   return f.webp?.url || f.gif?.url || null;
 }
 
-export function GifPicker({ onSelectGif, onClose }) {
+export function GifPicker({ onSelectGif, onClose, initialKind = 'gifs' }) {
+  const [kind, setKind] = useState(initialKind); // 'gifs' | 'stickers' (figurinhas, também do KLIPY)
   const [query, setQuery] = useState('');
   const [items, setItems] = useState([]);
   const [page, setPage] = useState(1);
@@ -40,6 +41,7 @@ export function GifPicker({ onSelectGif, onClose }) {
   const [error, setError] = useState('');
   const [customUrl, setCustomUrl] = useState('');
   const lastQuery = useRef(null);
+  const lastKind = useRef(kind);
 
   async function load(q, pg) {
     setLoading(true);
@@ -53,9 +55,9 @@ export function GifPicker({ onSelectGif, onClose }) {
     });
     if (q) params.set('q', q);
     try {
-      const r = await fetch(`https://api.klipy.com/api/v1/${KLIPY_KEY}/gifs/${q ? 'search' : 'trending'}?${params}`);
+      const r = await fetch(`https://api.klipy.com/api/v1/${KLIPY_KEY}/${kind}/${q ? 'search' : 'trending'}?${params}`);
       const j = await r.json();
-      if (lastQuery.current !== q) return; // a pessoa já digitou outra coisa
+      if (lastQuery.current !== q || lastKind.current !== kind) return; // a pessoa já digitou outra coisa
       const list = (j?.data?.data || [])
         .map(it => ({
           id: it.id,
@@ -79,12 +81,13 @@ export function GifPicker({ onSelectGif, onClose }) {
     const q = query.trim();
     const t = setTimeout(() => {
       lastQuery.current = q;
+      lastKind.current = kind;
       setPage(1);
       setItems([]);
       load(q, 1);
     }, q ? 350 : 0);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, kind]);
 
   function handleScroll(e) {
     const el = e.currentTarget;
@@ -107,6 +110,10 @@ export function GifPicker({ onSelectGif, onClose }) {
 
   return (
     <div className="gif-picker-popover">
+      <div className="gif-kind-tabs">
+        <button type="button" className={kind === 'gifs' ? 'active' : ''} onClick={() => setKind('gifs')}>GIFs</button>
+        <button type="button" className={kind === 'stickers' ? 'active' : ''} onClick={() => setKind('stickers')}>Figurinhas</button>
+      </div>
       <div className="gif-picker-header">
         <div className="gif-search-bar">
           <Search size={14} />
@@ -114,7 +121,7 @@ export function GifPicker({ onSelectGif, onClose }) {
             autoFocus
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Buscar GIFs no KLIPY"
+            placeholder={kind === 'stickers' ? 'Buscar figurinhas' : 'Buscar GIFs no KLIPY'}
           />
         </div>
         <button type="button" className="icon-btn xs" onClick={onClose}><X size={15} /></button>
@@ -133,14 +140,16 @@ export function GifPicker({ onSelectGif, onClose }) {
         ))}
       </div>
 
-      <div className="gif-grid" onScroll={handleScroll}>
+      <div className={`gif-grid ${kind === 'stickers' ? 'stickers' : ''}`} onScroll={handleScroll}>
         {items.map(g => (
           <button
             key={g.id}
             type="button"
             className="gif-item"
             title={g.title}
-            onClick={() => onSelectGif({ url: g.full, name: `${g.title}.gif`, mimetype: 'image/gif' })}
+            onClick={() => onSelectGif(kind === 'stickers'
+              ? { url: g.full, name: `sticker-${g.title}.webp`, mimetype: 'image/webp' }
+              : { url: g.full, name: `${g.title}.gif`, mimetype: 'image/gif' })}
           >
             <img src={g.thumb} alt={g.title} loading="lazy" />
           </button>
@@ -163,7 +172,7 @@ export function GifPicker({ onSelectGif, onClose }) {
         />
         <button type="button" className="btn-primary xs" onClick={handleCustomSubmit}>Enviar</button>
       </div>
-      <small className="gif-credit">Busca de GIFs pelo KLIPY</small>
+      <small className="gif-credit">{kind === 'stickers' ? 'Figurinhas' : 'GIFs'} pelo KLIPY</small>
     </div>
   );
 }

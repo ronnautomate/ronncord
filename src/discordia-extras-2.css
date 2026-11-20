@@ -96,3 +96,25 @@
 /* call sem tela: blocos se ajeitam sozinhos (tamanho calculado no CallStage), última fileira centralizada */
 .call-stage:not(.with-screen) { display: flex; flex-wrap: wrap; justify-content: center; align-content: safe center; gap: 12px; }
 .call-stage:not(.with-screen) > .call-tile { flex: 0 0 auto; width: var(--cam-size, 420px); max-width: 100%; }
+
+/* "Ver atualizações anteriores" no O que há de novo */
+.whats-new-older { align-self: center; margin: 4px auto 0; display: block; background: none; border: 1px solid var(--line); color: var(--text-muted); border-radius: 6px; padding: 7px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.whats-new-older:hover { color: var(--text); background: var(--bg-input); }
+
+/* quem tá assistindo a stream (igual Discord) */
+.call-watchers {
+  position: absolute; left: 10px; top: 10px; z-index: 3; display: flex; align-items: center; gap: 6px;
+  background: rgba(0, 0, 0, 0.62); color: #fff; border-radius: 14px; padding: 3px 9px 3px 7px; font-size: 12px; font-weight: 700;
+}
+.call-watchers-faces { display: flex; }
+.call-watchers-faces .call-avatar { box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.62); margin-left: -6px; font-size: 9px !important; }
+.call-watchers-faces .call-avatar:first-child { margin-left: 0; }
+.live-viewers { display: inline-flex; align-items: center; gap: 2px; color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
+
+/* adicionar amigo pelo cartão de perfil */
+.user-popout-friend {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; background: var(--green); color: #fff; border: none;
+  border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.user-popout-friend.done { background: var(--bg-input); color: var(--text-muted); cursor: default; }
+.server-rail .server-logo > .rail-dm-badge { pointer-events: none; }

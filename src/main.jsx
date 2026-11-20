@@ -4,12 +4,14 @@ import {
   Hash, Volume2, VolumeX, Plus, Settings, Mic, MicOff, Headphones, HeadphoneOff,
   UserPlus, Users, Compass, ChevronDown, Crown, Shield, PhoneOff,
   MonitorUp, MonitorOff, Sliders, Sparkles, Video, VideoOff, Maximize2, X,
-  Lock, Music, Download
+  Lock, Music, Download, Eye, Signal
 } from 'lucide-react';
 import { apiFetch, connectSocket, getToken, setToken, resolveAssetUrl } from './lib/api.js';
 import { VoiceManager, getSavedUserVolumes } from './lib/voiceManager.js';
 import { getSavedVoiceSettings } from './lib/audioPipeline.js';
 import { SoundFX } from './lib/soundEffects.js';
+import { playBoardSound, playBoardUrl } from './lib/soundboard.js';
+import { ensurePushSubscription } from './lib/push.js';
 import { AuthScreen } from './components/AuthScreen.jsx';
 import { ChatArea } from './components/ChatArea.jsx';
 import { FriendsView } from './components/FriendsView.jsx';
@@ -31,6 +33,7 @@ import { NOVIDADES, isNew, markSeen } from './lib/novidades.js';
 import './style.css';
 import './discordia-extras.css';
 import './discordia-extras-2.css';
+import './discord-ui.css';
 import { applyTheme, getSavedTheme, nameColor } from './lib/themes.js';
 import { isAvisoMessage, avisoText } from './lib/aviso.js';
 
@@ -129,11 +132,21 @@ function App() {
   const [screenQualities, setScreenQualities] = useState({}); // socketId de quem transmite -> qualidade que eu pedi
   const [hideMyScreen, setHideMyScreen] = useState(false); // escondi minha tela da sala (continua transmitindo)
   const [mutedScreenSockets, setMutedScreenSockets] = useState([]);
+  const [watchers, setWatchers] = useState({}); // socketId de quem transmite -> [quem assiste] (os outros)
+  const [myWatching, setMyWatching] = useState(null); // tela que eu tô assistindo
+  const [soundFlash, setSoundFlash] = useState({}); // socketId -> emoji do som que a pessoa tocou (some em 2s)
+  const deafenedRef = useRef(false);
+  function flashSound(socketId, emoji) {
+    if (!socketId) return;
+    setSoundFlash(prev => ({ ...prev, [socketId]: emoji || '🔊' }));
+    setTimeout(() => setSoundFlash(prev => { const n = { ...prev }; delete n[socketId]; return n; }), 2200);
+  }
   const [voiceSettings, setVoiceSettings] = useState(getSavedVoiceSettings);
 
   const [showMembers, setShowMembers] = useState(true);
   const [muted, setMuted] = useState(() => localStorage.getItem('ronncord_muted') === '1');
   const [deafened, setDeafened] = useState(() => localStorage.getItem('ronncord_deafened') === '1');
+  useEffect(() => { deafenedRef.current = deafened; }, [deafened]);
   const [pttActive, setPttActive] = useState(false);
   const [screenVolumes, setScreenVolumes] = useState({});
   const [unreadCounts, setUnreadCounts] = useState({});
@@ -213,6 +226,7 @@ function App() {
   const [hasNews, setHasNews] = useState(() => NOVIDADES.items.some(it => isNew(it)));
   const [modal, setModal] = useState(null); // null | 'server' | 'channel-text' | 'channel-voice' | 'invite' | 'profile' | 'voice-settings' | 'new-dm'
   const [selectedProfile, setSelectedProfile] = useState(null);
+  const [settingsSection, setSettingsSection] = useState(null); // voltar pra seção das configurações depois da janela de voz
   const [volumeTarget, setVolumeTarget] = useState(null);
   const [userVolumes, setUserVolumes] = useState(getSavedUserVolumes);
   const socketRef = useRef(null);
@@ -294,6 +308,7 @@ function App() {
       }
     }
     loadInitial();
+    ensurePushSubscription();
 
     const socket = connectSocket(getToken());
     socketRef.current = socket;
@@ -343,10 +358,20 @@ function App() {
     }
     // DM nova que outra pessoa abriu comigo aparece na lista sem precisar dar F5
     const dmPoll = setInterval(refreshDmThreads, 45000);
+    // pedidos de amizade: chegam na hora pelo socket; a busca de 30 em 30s cobre servidor antigo
+    async function refreshFriends() {
+      try {
+        const d = await apiFetch('/api/friends');
+        if (mounted) setFriends(d.friends);
+      } catch {}
+    }
+    const friendsPoll = setInterval(refreshFriends, 30000);
 
     if (socket) {
       socket.on('connect', () => {
         socket.emit('voice:sync');
+        // caiu e voltou no meio da call: entra de novo (senão a pessoa some da call sem perceber)
+        if (voiceChannelIdRef.current) voiceManagerRef.current?.rejoinAfterReconnect();
         joinedRooms.clear();
         Promise.all([apiFetch('/api/servers'), apiFetch('/api/dms')])
           .then(([srv, dms]) => joinAllRooms(srv.servers, dms.threads))
@@ -371,7 +396,9 @@ function App() {
             if (targetKey) {
               setUnreadCounts(prev => ({ ...prev, [targetKey]: (prev[targetKey] || 0) + 1 }));
             }
-            if (mentioned && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+            const notifMode = localStorage.getItem('ronncord_notif_mode') || 'mencoes';
+            const shouldNotify = notifMode === 'tudo' || (notifMode === 'mencoes' && mentioned);
+            if (shouldNotify && userStatusRef.current !== 'dnd' && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
               new Notification(`${isAviso ? '📢 Aviso de ' : ''}${msg.author?.display_name || 'RONNCORD'}`, {
                 body: (isAviso ? avisoText(msg.content) : msg.content) || 'Enviou um anexo'
               });
@@ -386,6 +413,10 @@ function App() {
         if (isCurrentlyOpen) {
           setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
         }
+      });
+      socket.on('friends:changed', ({ from, type }) => {
+        refreshFriends();
+        if (from !== user.id && type === 'request' && userStatusRef.current !== 'dnd') SoundFX.message();
       });
       socket.on('message:updated', msg => {
         const key = msg.channel_id || msg.dm_thread_id;
@@ -542,6 +573,12 @@ function App() {
           setHiddenVideoIds(prev => prev.filter(id => videos.some(v => v.id === id)));
         },
         onError: msg => alert(msg),
+        onWatchers: setWatchers,
+        onSoundboard: ({ fromSocketId, sound, url, emoji }) => {
+          if (deafenedRef.current) return;
+          if (url) playBoardUrl(url); else playBoardSound(sound);
+          flashSound(fromSocketId, emoji);
+        },
         // parou pela barra do Chrome ("Parar compartilhamento"): a tela some daqui também
         onScreenEnded: () => {
           setIsScreenSharing(false);
@@ -555,6 +592,7 @@ function App() {
     return () => {
       mounted = false;
       clearInterval(dmPoll);
+      clearInterval(friendsPoll);
       voiceManagerRef.current?.destroy();
       voiceManagerRef.current = null;
       socket?.disconnect();
@@ -784,6 +822,17 @@ function App() {
     await apiFetch(`/api/messages/${messageId}/reactions`, { method: 'POST', body: JSON.stringify({ emoji }) });
   }
 
+  async function handleVotePoll(messageId, option) {
+    if (isDemo) return;
+    try {
+      const { message } = await apiFetch(`/api/messages/${messageId}/vote`, { method: 'POST', body: JSON.stringify({ option }) });
+      if (message) setMessages(prev => prev.map(m => (m.id === message.id ? message : m)));
+    } catch (err) {
+      if (err.message === 'Erro 404') throw new Error('O servidor do RONNCORD ainda não tem enquete: falta o deploy da versão nova no Render.');
+      throw err;
+    }
+  }
+
   async function handleTogglePin(messageId) {
     if (isDemo) {
       setMessages(prev => prev.map(m => (m.id === messageId ? { ...m, pinned: !m.pinned } : m)));
@@ -858,11 +907,12 @@ function App() {
   useEffect(() => {
     if (!voiceChannelId || !voiceSettings.pttEnabled) {
       setPttActive(false);
+      voiceManagerRef.current?.setPttGate(false);
       return;
     }
     const targetKey = voiceSettings.pttKey || 'Space';
-    // Keep mic muted while PTT is active until key is pressed
-    voiceManagerRef.current?.setMuted(true);
+    // microfone fechado até apertar a tecla (sem marcar como mutado pros outros)
+    voiceManagerRef.current?.setPttGate(true);
 
     const onKeyDown = e => {
       if (e.code !== targetKey || e.repeat) return;
@@ -870,16 +920,16 @@ function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (targetKey === 'Space') e.preventDefault();
       setPttActive(true);
-      if (!muted) voiceManagerRef.current?.setMuted(false);
+      voiceManagerRef.current?.setPttGate(false);
     };
     const onKeyUp = e => {
       if (e.code !== targetKey) return;
       setPttActive(false);
-      voiceManagerRef.current?.setMuted(true);
+      voiceManagerRef.current?.setPttGate(true);
     };
     const onBlur = () => {
       setPttActive(false);
-      voiceManagerRef.current?.setMuted(true);
+      voiceManagerRef.current?.setPttGate(true);
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -910,9 +960,10 @@ function App() {
     } else if (voiceChannelId !== ch.id) {
       voiceChannelIdRef.current = ch.id;
       voiceCountRef.current = 0;
-      const effectiveMuted = voiceSettings.pttEnabled ? true : muted;
+      const effectiveMuted = muted;
       await voiceManagerRef.current?.join(ch.id, voiceSettings, {
         muted: effectiveMuted,
+        pttClosed: Boolean(voiceSettings.pttEnabled),
         deafened
       });
       setVoiceChannelId(ch.id);
@@ -1009,7 +1060,7 @@ function App() {
     const next = !muted;
     setMuted(next);
     localStorage.setItem('ronncord_muted', next ? '1' : '0');
-    voiceManagerRef.current?.setMuted(next || (voiceSettings.pttEnabled && !pttActive));
+    voiceManagerRef.current?.setMuted(next);
     if (next) SoundFX.mute();
     else SoundFX.unmute();
   }
@@ -1113,6 +1164,7 @@ function App() {
     return <AuthScreen onAuthSuccess={setUser} onEnterDemo={enterDemoMode} />;
   }
 
+  const incomingRequests = friends.filter(f => f.status === 'pending' && f.addressee_id === user.id).length;
   const currentTypingKey = viewMode === 'server' ? activeChannelId : activeDmId;
   // só as mensagens do chat aberto (evita piscar as do chat anterior no instante da troca)
   const chatMessages = messages.filter(m =>
@@ -1146,6 +1198,7 @@ function App() {
           onClick={() => { setSidebarMode('home'); setViewMode('home'); setActiveDmId(null); }}
         >
           <Compass size={22} />
+          {incomingRequests > 0 && <span className="rail-dm-badge" title="Pedidos de amizade">{incomingRequests}</span>}
         </button>
 
         {railDms.map(t => {
@@ -1175,7 +1228,7 @@ function App() {
         {servers.map(srv => (
           <button
             key={srv.id}
-            className={`server-logo ${sidebarMode === 'server' && activeServerId === srv.id ? 'active' : ''} ${srv.icon_url ? 'has-icon' : ''}`}
+            className={`server-logo ${sidebarMode === 'server' && activeServerId === srv.id ? 'active' : ''} ${srv.icon_url ? 'has-icon' : ''} ${srv.channels?.some(c => unreadCounts[c.id] > 0) ? 'has-unread' : ''}`}
             style={sidebarMode === 'server' && activeServerId === srv.id && !srv.icon_url ? { background: srv.icon_color } : {}}
             title={srv.name}
             onClick={() => {
@@ -1276,7 +1329,7 @@ function App() {
                       setActiveChannelId(ch.id);
                       setDrawer(null);
                       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-                        Notification.requestPermission().catch(() => {});
+                        Notification.requestPermission().then(p => p === 'granted' && ensurePushSubscription()).catch(() => {});
                       }
                     }}
                   >
@@ -1370,7 +1423,12 @@ function App() {
                                 <button
                                   type="button"
                                   className="live-badge clickable"
-                                  title="Assistir transmissão"
+                                  title={(() => {
+                                    const ids = new Set(watchers[p.socketId] || []);
+                                    if (myWatching === p.socketId) ids.add('me');
+                                    const names = [...ids].map(id => (id === 'me' ? 'você' : participants.find(x => x.socketId === id)?.displayName)).filter(Boolean);
+                                    return names.length ? `Assistindo: ${names.join(', ')}` : 'Assistir transmissão';
+                                  })()}
                                   onClick={async e => {
                                     e.stopPropagation();
                                     setHiddenVideoIds([]);
@@ -1380,6 +1438,10 @@ function App() {
                                   AO VIVO
                                 </button>
                               )}
+                              {p.screenSharing && (() => {
+                                const n = new Set([...(watchers[p.socketId] || []), ...(myWatching === p.socketId ? ['me'] : [])]).size;
+                                return n > 0 ? <small className="live-viewers" title="Quantos estão assistindo"><Eye size={11} /> {n}</small> : null;
+                              })()}
                             </div>
                             );
                           })}
@@ -1403,7 +1465,8 @@ function App() {
                   onClick={() => { setViewMode('home'); setActiveDmId(null); setDrawer(null); }}
                 >
                   <Users size={16} />
-                  <span>Amigos</span>
+                  <span style={{ flex: 1 }}>Amigos</span>
+                  {incomingRequests > 0 && <span className="unread-badge">{incomingRequests}</span>}
                 </div>
               </div>
               <div className="sidebar-section">
@@ -1462,73 +1525,46 @@ function App() {
           </>
         )}
 
-        {voiceChannelId && (
-          <div className="voice-status-bar">
-            <div
-              className="voice-status-open"
-              title="Abrir a sala"
-              onClick={() => {
-                const ch = activeServer?.channels?.find(c => c.id === voiceChannelId) ||
-                  servers.flatMap(sv => sv.channels || []).find(c => c.id === voiceChannelId);
-                if (ch) openVoiceRoom(ch);
-              }}
-            >
-              <strong>
-                <Sparkles size={12} style={{ display: 'inline', marginRight: 4 }} />
-                Voz Conectada {voicePing !== null ? `• ${voicePing} ms` : ''}
-              </strong>
-              <small>
-                {voiceSettings.noiseMode === 'hybrid'
-                  ? 'AI Max (RNNoise+GTCRN) • Opus 10ms'
-                  : voiceSettings.noiseMode === 'gtcrn'
-                  ? 'AI Ultra (GTCRN) • Opus 10ms'
-                  : voiceSettings.noiseMode === 'rnnoise'
-                  ? 'RNNoise SIMD • Opus 10ms'
-                  : 'Estúdio Puro • Opus 10ms'}
-              </small>
+        {voiceChannelId && (() => {
+          const vch = servers.flatMap(sv => (sv.channels || []).map(c => ({ ...c, serverName: sv.name }))).find(c => c.id === voiceChannelId);
+          return (
+            <div className="voice-status-bar discord">
+              <div className="voice-status-top">
+                <div
+                  className="voice-status-open"
+                  title={`Abrir a sala${voicePing !== null ? ` • ${voicePing} ms` : ''}`}
+                  onClick={() => { if (vch) openVoiceRoom(vch); }}
+                >
+                  <strong>
+                    <Signal size={15} /> Voz conectada
+                    {voicePing !== null && <span className="voice-ping">{voicePing} ms</span>}
+                  </strong>
+                  <small>{vch ? `${vch.name} / ${vch.serverName}` : 'Sala'}</small>
+                </div>
+                <button className="icon-btn voice-leave" title="Desconectar" onClick={leaveVoice}>
+                  <PhoneOff size={18} />
+                </button>
+              </div>
+              <div className="voice-status-actions">
+                <button className={isCameraOn ? 'on' : ''} title={isCameraOn ? 'Desligar câmera' : 'Ligar câmera'} onClick={toggleCamera}>
+                  {isCameraOn ? <VideoOff size={18} /> : <Video size={18} />}
+                </button>
+                <button className={isScreenSharing ? 'on' : ''} title={isScreenSharing ? 'Parar de compartilhar' : 'Compartilhar tela'} onClick={toggleScreenShare}>
+                  {isScreenSharing ? <MonitorOff size={18} /> : <MonitorUp size={18} />}
+                </button>
+                <button className={musicState?.isPlaying ? 'on' : ''} title="RonnBot Música" onClick={() => setModal('music')}>
+                  <Music size={18} />
+                </button>
+                <button title="Configurações de voz e supressão de ruído" onClick={() => setModal('voice-settings')}>
+                  <Sliders size={18} />
+                </button>
+              </div>
             </div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button
-                className={`icon-btn ${isCameraOn ? 'active' : ''}`}
-                title={isCameraOn ? 'Desligar Câmera' : 'Ligar Câmera (1080p 60fps)'}
-                onClick={toggleCamera}
-              >
-                {isCameraOn ? <VideoOff size={16} /> : <Video size={16} />}
-              </button>
-              <button
-                className={`icon-btn ${isScreenSharing ? 'active' : ''}`}
-                title={isScreenSharing ? 'Parar Compartilhamento' : 'Compartilhar Tela (1080p 60fps)'}
-                onClick={toggleScreenShare}
-              >
-                {isScreenSharing ? <MonitorOff size={16} /> : <MonitorUp size={16} />}
-              </button>
-              <button
-                className={`icon-btn ${musicState?.isPlaying ? 'active' : ''}`}
-                title="RonnBot Música"
-                onClick={() => setModal('music')}
-              >
-                <Music size={16} />
-              </button>
-              <button
-                className="icon-btn"
-                title="Configurações de Voz e Supressão IA"
-                onClick={() => setModal('voice-settings')}
-              >
-                <Sliders size={16} />
-              </button>
-              <button
-                className="icon-btn danger"
-                title="Desconectar"
-                onClick={leaveVoice}
-              >
-                <PhoneOff size={16} />
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
-        <div className="user-panel">
-          <div className="user-panel-left" onClick={() => setModal('profile')}>
+        <div className="user-panel discord">
+          <div className="user-panel-left" onClick={() => setModal('profile')} title="Configurações">
             <div className={`avatar ${isSpeaking ? 'speaking-ring' : ''} deco-${user.avatar_decoration || 'none'}`} style={{ background: user.avatar_color }}>
               {user.avatar_url ? (
                 <img src={resolveAssetUrl(user.avatar_url)} alt={user.display_name} className="avatar-img" />
@@ -1539,24 +1575,29 @@ function App() {
             </div>
             <div className="user-details">
               <strong>{user.display_name}</strong>
-              <small>{user.custom_status || `@${user.username}`}</small>
+              <small>
+                <span className="user-status-swap">
+                  <span>{user.custom_status || { online: 'Online', idle: 'Ausente', dnd: 'Não perturbe', offline: 'Invisível' }[myStatus] || 'Online'}</span>
+                  <span>@{user.username}</span>
+                </span>
+              </small>
             </div>
           </div>
           <div className="user-panel-actions">
-            <button className={`icon-btn xs ${muted ? 'danger' : ''}`} onClick={handleToggleMute} title="Silenciar Microfone">
-              {muted ? <MicOff size={16} /> : <Mic size={16} />}
-            </button>
-            <button className={`icon-btn xs ${deafened ? 'danger' : ''}`} onClick={handleToggleDeafen} title="Desativar Áudio">
-              {deafened ? <HeadphoneOff size={16} /> : <Headphones size={16} />}
-            </button>
-            <button className="icon-btn xs" onClick={() => setModal('notes')} title="Notas Privadas (Criptografadas)">
-              <Lock size={16} />
-            </button>
-            <button className="icon-btn xs" onClick={() => setModal('voice-settings')} title="Áudio & Supressão de Ruído IA">
-              <Sliders size={16} />
-            </button>
-            <button className="icon-btn xs" onClick={() => setModal('profile')} title="Configurações de Perfil">
-              <Settings size={16} />
+            <div className={`panel-btn-group ${muted ? 'off' : ''}`}>
+              <button onClick={handleToggleMute} title={muted ? 'Desmutar' : 'Mutar'}>
+                {muted ? <MicOff size={20} /> : <Mic size={20} />}
+              </button>
+              <button className="chev" onClick={() => setModal('voice-settings')} title="Microfone e supressão de ruído"><ChevronDown size={14} /></button>
+            </div>
+            <div className={`panel-btn-group ${deafened ? 'off' : ''}`}>
+              <button onClick={handleToggleDeafen} title={deafened ? 'Voltar a ouvir' : 'Ensurdecer'}>
+                {deafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
+              </button>
+              <button className="chev" onClick={() => setModal('voice-settings')} title="Configurações de voz"><ChevronDown size={14} /></button>
+            </div>
+            <button className="panel-gear" onClick={() => setModal('profile')} title="Configurações de usuário">
+              <Settings size={20} />
             </button>
           </div>
         </div>
@@ -1566,6 +1607,8 @@ function App() {
       <div className="main-stage">
       {viewMode === 'voice' && voiceChannelId ? (
         <CallStage
+          socket={socketRef.current}
+          channelId={voiceChannelId}
           channelName={(servers.flatMap(sv => sv.channels || []).find(c => c.id === voiceChannelId) || {}).name || 'Sala'}
           people={callPeople}
           remoteVideos={remoteVideos}
@@ -1614,6 +1657,19 @@ function App() {
             avatar_color: p.color, avatar_url: p.avatarUrl, status: 'online'
           })}
           onOpenNav={() => setDrawer('nav')}
+          watchers={watchers}
+          soundFlash={soundFlash}
+          onSoundboard={payload => {
+            if (!deafened) { if (payload.url) playBoardUrl(payload.url); else playBoardSound(payload.sound); }
+            voiceManagerRef.current?.sendSoundboard(payload);
+            const me = (voiceParticipants[voiceChannelId] || []).find(p => p.userId === user.id);
+            flashSound(me?.socketId, payload.emoji);
+          }}
+          onUploadSound={handleUploadFile}
+          onWatchingChange={id => {
+            setMyWatching(id);
+            voiceManagerRef.current?.setWatching(id);
+          }}
         />
       ) : viewMode === 'server' && activeChannel ? (
         <ChatArea
@@ -1636,6 +1692,7 @@ function App() {
           onTogglePin={handleTogglePin}
           onUploadFile={handleUploadFile}
           onSelectUser={setSelectedProfile}
+          onVotePoll={handleVotePoll}
           onTyping={isTyping =>
             socketRef.current?.emit(isTyping ? 'typing_start' : 'typing_stop', { channelId: activeChannel.id })
           }
@@ -1656,6 +1713,7 @@ function App() {
           onTogglePin={handleTogglePin}
           onUploadFile={handleUploadFile}
           onSelectUser={setSelectedProfile}
+          onVotePoll={handleVotePoll}
           onTyping={isTyping =>
             socketRef.current?.emit(isTyping ? 'typing_start' : 'typing_stop', { dmThreadId: activeDm.id })
           }
@@ -1666,9 +1724,10 @@ function App() {
           currentUserId={user.id}
           onAddFriend={async username => {
             if (isDemo) throw new Error('Disponível com o backend ativo.');
-            await apiFetch('/api/friends/request', { method: 'POST', body: JSON.stringify({ username }) });
+            const r = await apiFetch('/api/friends/request', { method: 'POST', body: JSON.stringify({ username }) });
             const d = await apiFetch('/api/friends');
             setFriends(d.friends);
+            return r;
           }}
           onAcceptFriend={async id => {
             await apiFetch(`/api/friends/${id}/accept`, { method: 'POST' });
@@ -1777,10 +1836,15 @@ function App() {
       {modal === 'profile' && (
         <ProfileModal
           user={user}
-          onClose={() => setModal(null)}
+          initialSection={settingsSection || 'conta'}
+          onClose={() => { setModal(null); setSettingsSection(null); }}
           onSave={handleSaveProfile}
           onUploadAvatar={handleUploadFile}
           onLogout={handleLogout}
+          onOpenVoiceSettings={() => { setSettingsSection('voz'); setModal('voice-settings'); }}
+          onOpenWhatsNew={() => setWhatsNew('all')}
+          onOpenNotes={() => setModal('notes')}
+          onVoiceOutputChange={() => voiceManagerRef.current?.applyOutputDevice()}
         />
       )}
       {modal === 'new-dm' && (
@@ -1794,6 +1858,17 @@ function App() {
           member={(activeServer?.members || []).find(m => m.id === selectedProfile.id) ? { ...selectedProfile, role: activeServer.members.find(m => m.id === selectedProfile.id).role } : selectedProfile}
           currentUserId={user.id}
           canManageRoles={!isDemo && activeServer?.my_role === 'owner'}
+          friendship={friends.find(f => f.friend_id === selectedProfile.id) || null}
+          onAddFriend={isDemo ? undefined : async username => {
+            await apiFetch('/api/friends/request', { method: 'POST', body: JSON.stringify({ username }) });
+            const d = await apiFetch('/api/friends');
+            setFriends(d.friends);
+          }}
+          onAcceptFriend={async id => {
+            await apiFetch(`/api/friends/${id}/accept`, { method: 'POST' });
+            const d = await apiFetch('/api/friends');
+            setFriends(d.friends);
+          }}
           onSetRole={async (userId, role) => {
             await apiFetch(`/api/servers/${activeServer.id}/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) });
             setServers(prev => prev.map(s => (s.id === activeServer.id ? { ...s, members: s.members.map(m => (m.id === userId ? { ...m, role } : m)) } : s)));
@@ -1818,7 +1893,7 @@ function App() {
       )}
       {modal === 'voice-settings' && (
         <VoiceSettingsModal
-          onClose={() => setModal(null)}
+          onClose={() => setModal(settingsSection ? 'profile' : null)}
           onApplySettings={async newSettings => {
             setVoiceSettings(newSettings);
             await voiceManagerRef.current?.reloadPipeline(newSettings);

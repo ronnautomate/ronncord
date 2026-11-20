@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, UserPlus, UserCheck, Clock } from 'lucide-react';
 import { resolveAssetUrl } from '../lib/api.js';
 import { nameColor as safeNameColor } from '../lib/themes.js';
 
@@ -20,7 +20,8 @@ function parseBadges(raw) {
   try { return JSON.parse(raw || '[]'); } catch { return []; }
 }
 
-export function UserPopout({ member, currentUserId, badgesCatalog = [], onClose, onSendDM, onQuickDmMessage, canManageRoles = false, onSetRole }) {
+export function UserPopout({ member, currentUserId, badgesCatalog = [], onClose, onSendDM, onQuickDmMessage, canManageRoles = false, onSetRole, friendship = null, onAddFriend, onAcceptFriend }) {
+  const [friendBusy, setFriendBusy] = useState(false);
   const [roleBusy, setRoleBusy] = useState(false);
   const [quickMsg, setQuickMsg] = useState('');
   const [pos, setPos] = useState(null);
@@ -135,6 +136,30 @@ export function UserPopout({ member, currentUserId, badgesCatalog = [], onClose,
               >
                 {member.role === 'admin' ? 'Tirar admin' : 'Tornar admin'}
               </button>
+            )}
+
+            {!isMe && onAddFriend && (
+              friendship?.status === 'accepted' ? (
+                <span className="user-popout-friend done"><UserCheck size={14} /> Amigos</span>
+              ) : friendship?.status === 'pending' && friendship.addressee_id !== currentUserId ? (
+                <span className="user-popout-friend done"><Clock size={14} /> Pedido enviado</span>
+              ) : (
+                <button
+                  type="button"
+                  className="user-popout-friend"
+                  disabled={friendBusy}
+                  onClick={async () => {
+                    setFriendBusy(true);
+                    try {
+                      if (friendship?.status === 'pending') await onAcceptFriend(friendship.id);
+                      else await onAddFriend(member.username);
+                    } catch (err) { alert(err.message); }
+                    setFriendBusy(false);
+                  }}
+                >
+                  <UserPlus size={14} /> {friendship?.status === 'pending' ? 'Aceitar pedido de amizade' : 'Adicionar amigo'}
+                </button>
+              )
             )}
 
             {!isMe && (

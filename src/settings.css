@@ -1,0 +1,117 @@
+/* ============================================================
+   CONFIGURAÇÕES (jeito do Discord / discordia): tela cheia,
+   menu de seções na esquerda e a seção na direita.
+   No celular o menu vira abas no topo.
+   ============================================================ */
+.settings-layer {
+  position: fixed; inset: 0; z-index: 120; display: flex; background: var(--bg-chat);
+  animation: settings-in 0.16s ease-out;
+}
+@keyframes settings-in { from { opacity: 0; transform: scale(1.02); } to { opacity: 1; transform: none; } }
+
+.settings-nav {
+  flex: 1 0 218px; display: flex; justify-content: flex-end; background: var(--bg-sidebar);
+  overflow-y: auto; position: relative; z-index: 2;
+}
+.settings-nav-inner { width: 218px; padding: 60px 8px 24px 20px; display: flex; flex-direction: column; gap: 2px; }
+.settings-nav h4 {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted);
+  padding: 14px 10px 6px;
+}
+.settings-nav h4:first-child { padding-top: 0; }
+.settings-nav button {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: none; border: none;
+  color: var(--text-muted); font: inherit; font-size: 15px; font-weight: 500; padding: 7px 10px; border-radius: 6px; cursor: pointer;
+}
+.settings-nav button:hover { background: var(--bg-hover); color: var(--text); }
+.settings-nav button.active { background: var(--bg-selected); color: var(--text); }
+.settings-nav button.danger { color: var(--red); }
+.settings-nav button.danger:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+.settings-nav-sep { height: 1px; background: var(--line); margin: 10px 10px; }
+
+.settings-content { flex: 1 1 800px; overflow-y: auto; position: relative; z-index: 2; }
+.settings-content-inner { max-width: 820px; padding: 60px 40px 120px; }
+.settings-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; gap: 16px; }
+.settings-head h2 { font-size: 21px; font-weight: 700; color: var(--text); }
+.settings-close {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: none;
+  color: var(--text-muted); cursor: pointer; flex-shrink: 0;
+}
+.settings-close svg { width: 36px; height: 36px; padding: 8px; border: 2px solid currentColor; border-radius: 50%; }
+.settings-close small { font-size: 12px; font-weight: 700; }
+.settings-close:hover { color: var(--text); }
+
+.settings-body { display: block; }
+.settings-body.with-preview { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; align-items: start; }
+.settings-form { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.settings-group {
+  display: flex; flex-direction: column; gap: 10px; padding: 18px 0; border-bottom: 1px solid var(--line);
+}
+.settings-group:first-child { padding-top: 0; }
+.settings-group:last-child { border-bottom: none; }
+.settings-group h3 {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.03em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.settings-group input:not([type=checkbox]):not([type=range]), .settings-group select, .settings-group textarea {
+  background: var(--bg-rail); color: var(--text); border: 1px solid transparent; border-radius: 8px;
+  padding: 10px 12px; font: inherit; font-size: 15px; width: 100%;
+}
+.settings-group input:focus, .settings-group select:focus, .settings-group textarea:focus { outline: none; border-color: var(--accent); }
+.settings-group textarea { resize: vertical; min-height: 70px; }
+.settings-field { display: flex; flex-direction: column; gap: 6px; }
+.settings-field > span { font-size: 13px; font-weight: 600; color: var(--text); }
+.settings-hint { color: var(--text-muted); font-size: 13px; line-height: 1.4; }
+.settings-row-wrap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.settings-check { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 15px; cursor: pointer; }
+.settings-check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.settings-cam-test { width: 100%; max-width: 360px; aspect-ratio: 16 / 9; border-radius: 10px; background: #000; object-fit: cover; transform: scaleX(-1); }
+
+.settings-preview-col { position: sticky; top: 0; display: flex; flex-direction: column; gap: 10px; }
+.settings-preview-col h3 { font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-muted); }
+.settings-preview { margin: 0; }
+.settings-preview-bio { margin-top: 8px; font-size: 13px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+
+/* botões que faltavam no app */
+.btn-primary.sm, .btn-ghost.sm { padding: 8px 14px; font-size: 14px; }
+.btn-ghost.sm { background: var(--bg-input); color: var(--text); }
+.btn-ghost.sm:hover { background: var(--bg-selected); }
+.btn-link { background: none; border: none; color: var(--text); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; padding: 6px 8px; }
+.btn-link:hover { text-decoration: underline; }
+.btn-success {
+  background: var(--green); color: #fff; border: none; border-radius: 6px; padding: 9px 16px;
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.btn-success:hover { filter: brightness(1.08); }
+.btn-success:disabled { opacity: 0.6; cursor: default; }
+
+/* barra de "alterações não salvas" (igual Discord) */
+.settings-unsaved {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 5; width: min(700px, calc(100vw - 32px));
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  background: var(--bg-rail); color: var(--text); border-radius: 10px; padding: 10px 10px 10px 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45); animation: unsaved-in 0.18s ease-out; font-size: 14px; font-weight: 500;
+}
+.settings-unsaved > div { display: flex; gap: 6px; align-items: center; }
+@keyframes unsaved-in { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+.settings-layer.shake .settings-unsaved { animation: unsaved-shake 0.5s; background: var(--red); }
+.settings-layer.shake .settings-unsaved .btn-link { color: #fff; }
+@keyframes unsaved-shake {
+  0%, 100% { transform: translateX(-50%); }
+  20%, 60% { transform: translateX(calc(-50% - 8px)); }
+  40%, 80% { transform: translateX(calc(-50% + 8px)); }
+}
+
+/* celular: menu vira abas no topo */
+@media (max-width: 760px) {
+  .settings-layer { flex-direction: column; }
+  .settings-nav { flex: none; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; }
+  .settings-nav-inner { width: auto; flex-direction: row; padding: 8px; gap: 4px; }
+  .settings-nav h4, .settings-nav-sep { display: none; }
+  .settings-nav button { white-space: nowrap; width: auto; font-size: 14px; }
+  .settings-content-inner { padding: 18px 16px 120px; }
+  .settings-body.with-preview { grid-template-columns: 1fr; }
+  .settings-preview-col { position: static; order: -1; }
+  .settings-close svg { width: 32px; height: 32px; }
+  .settings-close small { display: none; }
+}

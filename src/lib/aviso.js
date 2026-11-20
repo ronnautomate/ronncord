@@ -13,5 +13,6 @@ export function avisoText(content) {
 
 // comandos que aparecem quando a pessoa digita "/" no começo da mensagem
 export const SLASH_COMMANDS = [
-  { cmd: '/aviso', args: 'texto', desc: 'manda um aviso destacado pra todo mundo (notifica geral)' }
+  { cmd: '/aviso', args: 'texto', desc: 'manda um aviso destacado pra todo mundo (notifica geral)' },
+  { cmd: '/poll', args: 'pergunta', desc: 'cria uma enquete (abre a janela pra pôr as opções)', window: 'poll' }
 ];

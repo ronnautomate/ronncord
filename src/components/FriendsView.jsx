@@ -1,8 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { resolveAssetUrl } from '../lib/api.js';
 import { Users, UserPlus, MessageSquare, Check, X, Menu } from 'lucide-react';
 
 export function FriendsView({ friends, currentUserId, onAddFriend, onAcceptFriend, onRemoveFriend, onOpenDM, onOpenNav }) {
-  const [tab, setTab] = useState('online');
+  const incoming = friends.filter(f => f.status === 'pending' && f.addressee_id === currentUserId);
+  // chegou pedido novo: abre direto em Pendentes (igual Discord)
+  const [tab, setTab] = useState(() => (incoming.length ? 'pending' : 'online'));
+  const lastIncoming = useRef(incoming.length);
+  useEffect(() => {
+    if (incoming.length > lastIncoming.current && tab !== 'add') setTab('pending');
+    lastIncoming.current = incoming.length;
+  }, [incoming.length]);
   const [usernameInput, setUsernameInput] = useState('');
   const [feedback, setFeedback] = useState('');
 
@@ -10,9 +18,9 @@ export function FriendsView({ friends, currentUserId, onAddFriend, onAcceptFrien
     e.preventDefault();
     setFeedback('');
     try {
-      await onAddFriend(usernameInput);
+      const r = await onAddFriend(usernameInput);
       setUsernameInput('');
-      setFeedback('Solicitação de amizade enviada!');
+      setFeedback(r?.accepted ? 'Ela já tinha te mandado pedido: agora vocês são amigos!' : `Pedido enviado! Quando aceitarem, aparece em Todos.`);
     } catch (err) {
       setFeedback(err.message);
     }
@@ -84,12 +92,20 @@ export function FriendsView({ friends, currentUserId, onAddFriend, onAcceptFrien
                   <div className="friend-row" key={f.id}>
                     <div className="friend-info">
                       <div className="avatar" style={{ background: f.avatar_color || '#5865F2' }}>
-                        {(f.display_name || f.username)[0].toUpperCase()}
+                        {f.avatar_url ? (
+                          <img src={resolveAssetUrl(f.avatar_url)} alt={f.display_name} className="avatar-img" />
+                        ) : (
+                          (f.display_name || f.username)[0].toUpperCase()
+                        )}
                         <span className={`status-dot ${f.user_status || 'offline'}`} />
                       </div>
                       <div>
                         <strong>{f.display_name}</strong>
-                        <small>@{f.username} • {f.custom_status || f.user_status || 'offline'}</small>
+                        <small>
+                          {f.status === 'pending'
+                            ? (isIncoming ? 'Pedido de amizade recebido' : 'Pedido de amizade enviado')
+                            : `@${f.username} • ${f.custom_status || f.user_status || 'offline'}`}
+                        </small>
                       </div>
                     </div>
                     <div className="friend-actions">
@@ -102,7 +118,14 @@ export function FriendsView({ friends, currentUserId, onAddFriend, onAcceptFrien
                           <Check size={16} />
                         </button>
                       ) : null}
-                      <button className="icon-btn circle danger" title="Remover" onClick={() => onRemoveFriend(f.id)}>
+                      <button
+                        className="icon-btn circle danger"
+                        title={f.status === 'accepted' ? 'Desfazer amizade' : isIncoming ? 'Recusar' : 'Cancelar pedido'}
+                        onClick={() => {
+                          if (f.status === 'accepted' && !confirm(`Desfazer amizade com ${f.display_name}?`)) return;
+                          onRemoveFriend(f.id);
+                        }}
+                      >
                         <X size={16} />
                       </button>
                     </div>
