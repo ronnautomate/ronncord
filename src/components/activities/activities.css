@@ -464,3 +464,16 @@
 .act-som-pop input[type=range] { width: 100%; accent-color: var(--accent); }
 .act-som-pop .act-som-check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
 .act-som-pop small { color: var(--text-muted); font-size: 11px; line-height: 1.35; }
+.act-lingua { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.act-lingua > div { display: flex; gap: 6px; }
+.act-lingua button { flex: 1; background: var(--bg-input); color: var(--text); border: 1px solid transparent; border-radius: 6px; padding: 6px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.act-lingua button.ativo { border-color: var(--accent); background: var(--bg-selected); }
+
+/* minimapa igual GeoGuessr: pequeno e meio transparente, cresce quando passa o mouse */
+.geo-mapa-caixa.p { width: 300px; height: 210px; opacity: 0.72; }
+.geo-mapa-caixa.p:hover, .geo-mapa-caixa.p:focus-within { width: min(580px, 62%); height: min(430px, 74%); opacity: 1; }
+.geo-mapa-caixa { transition: width 0.2s ease, height 0.2s ease, opacity 0.2s ease; }
+/* bússola do Pannellum no canto de cima */
+.geo-foto .pnlm-compass { top: 10px; right: 10px; left: auto; width: 48px; height: 48px; }
+@media (max-width: 760px) { .geo-mapa-caixa.p, .geo-mapa-caixa.p:hover { opacity: 1; } }
+@media (max-width: 640px) { .geo-mapa-caixa.p, .geo-mapa-caixa.p:hover, .geo-mapa-caixa.p:focus-within { width: auto; height: 48%; } }
