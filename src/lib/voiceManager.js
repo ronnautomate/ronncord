@@ -169,6 +169,7 @@ export class VoiceManager {
     this.screenAudioMuted = new Set(); // socketId set for muted screen-share audio
     this.watchingTarget = null; // tela de quem eu tô assistindo (socketId)
     this.watchers = new Map(); // socketId de quem assiste -> socketId de quem transmite
+    this.remoteMicStream = new Map(); // socketId -> id do stream do microfone da pessoa (pra nunca confundir com o som da tela)
     this.muted = false;
     this.deafened = false;
     this.pttClosed = false; // apertar pra falar com a tecla solta
@@ -331,7 +332,7 @@ export class VoiceManager {
     const vols = getSavedUserVolumes();
     for (const [sid, peer] of this.peers.entries()) {
       const vol = vols[peer.userId] ?? 100;
-      const useBoost = vol > 100;
+      const useBoost = this._boostOk(vol);
       for (const audioEl of peer.audioEls.values()) {
         audioEl.muted = deafened || useBoost || vol === 0;
         if (!useBoost) audioEl.volume = Math.min(1, vol / 100);
@@ -351,13 +352,53 @@ export class VoiceManager {
     }
   }
 
+  // o aviso do microfone chegou depois do áudio: se a voz foi parar como "som da tela", volta pra voz
+  _fixAudioKinds(socketId) {
+    const peer = this.peers.get(socketId);
+    const micId = this.remoteMicStream.get(socketId);
+    if (!peer || !micId || !peer.screenAudioEls) return;
+    const vols = getSavedUserVolumes();
+    for (const [tid, el] of Array.from(peer.screenAudioEls.entries())) {
+      if (el.dataset.stream !== micId) continue;
+      peer.screenAudioEls.delete(tid);
+      peer.audioEls.set(tid, el);
+      const vol = vols[peer.userId] ?? 100;
+      el.muted = this.deafened || vol === 0;
+      el.volume = Math.min(1, vol / 100);
+      el.play?.().catch(() => {});
+    }
+  }
+
+  // volume acima de 100% só passa pelo amplificador se ele estiver rodando de verdade
+  _boostOk(vol, aindaCriando = false) {
+    if (vol <= 100) return false;
+    if (aindaCriando && !this.playbackCtx) return false;
+    return this.playbackCtx?.state === 'running';
+  }
+
+  _reapplyVolumes() {
+    const vols = getSavedUserVolumes();
+    for (const peer of this.peers.values()) {
+      const vol = vols[peer.userId] ?? 100;
+      const useBoost = this._boostOk(vol);
+      for (const audioEl of peer.audioEls.values()) {
+        audioEl.muted = this.deafened || useBoost || vol === 0;
+        audioEl.volume = useBoost ? 1 : Math.min(1, vol / 100);
+        if (!audioEl.muted && audioEl.paused) audioEl.play().catch(() => {});
+      }
+      for (const gain of (peer.gainNodes?.values() || [])) {
+        gain.gain.value = (this.deafened || !useBoost) ? 0 : (vol / 100);
+      }
+    }
+  }
+
   setUserVolume(userId, percent) {
     const clamped = saveUserVolume(userId, percent);
     if (this.playbackCtx?.state === 'suspended') {
       this.playbackCtx.resume().catch(() => {});
     }
     if (this.deafened) return clamped;
-    const useBoost = clamped > 100;
+    const useBoost = this._boostOk(clamped);
     for (const peer of this.peers.values()) {
       if (peer.userId === userId) {
         for (const audioEl of peer.audioEls.values()) {
@@ -684,6 +725,11 @@ export class VoiceManager {
 
   async _handleSignal({ fromSocketId, channelId, user, signal }) {
     if (channelId !== this.channelId) return;
+    if (signal.type === 'mic-stream') {
+      this.remoteMicStream.set(fromSocketId, signal.streamId);
+      this._fixAudioKinds(fromSocketId);
+      return;
+    }
     if (signal.type === 'soundboard') {
       this.callbacks.onSoundboard?.({ fromSocketId, sound: signal.sound, url: signal.url, emoji: signal.emoji, name: signal.name });
       return;
@@ -824,6 +870,8 @@ export class VoiceManager {
       this.pipeline.stream.getAudioTracks().forEach(track => {
         micSender = pc.addTrack(track, this.pipeline.stream);
       });
+      // conta qual stream é o microfone: quem recebe separa a voz do som da tela por isso
+      this.socket?.emit('webrtc:signal', { targetSocketId, channelId: this.channelId, signal: { type: 'mic-stream', streamId: this.pipeline.stream.id } });
     }
     if (this.cameraStream) {
       const track = this.cameraStream.getVideoTracks()[0];
@@ -909,16 +957,19 @@ export class VoiceManager {
         if (!micStreamId && !(event.streams?.[0]?.getVideoTracks?.().length > 0)) {
           micStreamId = incomingStreamId;
         }
-        const isScreenAudio =
-          (midKey && this.trackMetaMap.get(midKey) === 'screen-audio') ||
-          (event.streams?.[0]?.getVideoTracks?.().length > 0) ||
-          (micStreamId && incomingStreamId && incomingStreamId !== micStreamId) ||
-          audioEls.size > 0;
+        const knownMic = this.remoteMicStream.get(targetSocketId);
+        const isScreenAudio = knownMic && incomingStreamId
+          ? incomingStreamId !== knownMic
+          : (midKey && this.trackMetaMap.get(midKey) === 'screen-audio') ||
+            (event.streams?.[0]?.getVideoTracks?.().length > 0) ||
+            (micStreamId && incomingStreamId && incomingStreamId !== micStreamId) ||
+            audioEls.size > 0;
 
         const audioEl = document.createElement('audio');
         audioEl.autoplay = true;
         audioEl.playsInline = true;
         audioEl.srcObject = trackStream;
+        audioEl.dataset.stream = incomingStreamId || '';
         if (outputDeviceId()) audioEl.setSinkId?.(outputDeviceId()).catch(() => {});
         audioPool.appendChild(audioEl);
 
@@ -936,7 +987,7 @@ export class VoiceManager {
         }
 
         const savedVol = getSavedUserVolumes()[userId] ?? 100;
-        const useBoost = savedVol > 100;
+        const useBoost = this._boostOk(savedVol, true);
         audioEl.muted = this.deafened || useBoost || savedVol === 0;
         audioEl.volume = useBoost ? 1.0 : Math.min(1, savedVol / 100);
         audioEls.set(event.track.id, audioEl);
@@ -945,6 +996,13 @@ export class VoiceManager {
           const Ctx = window.AudioContext || window.webkitAudioContext;
           this.playbackCtx = new Ctx({ latencyHint: 'interactive' });
           if (outputDeviceId() && this.playbackCtx.setSinkId) this.playbackCtx.setSinkId(outputDeviceId()).catch(() => {});
+          // o amplificador (volume acima de 100%) dorme quando o navegador pausa o áudio:
+          // enquanto ele não estiver rodando, a voz toca direto a 100% (melhor que sumir)
+          this.playbackCtx.addEventListener('statechange', () => this._reapplyVolumes());
+          const acordar = () => { if (this.playbackCtx?.state !== 'running') this.playbackCtx?.resume().catch(() => {}); };
+          window.addEventListener('pointerdown', acordar, true);
+          window.addEventListener('keydown', acordar, true);
+          document.addEventListener('visibilitychange', acordar);
         }
         if (this.playbackCtx.state === 'suspended') {
           this.playbackCtx.resume().catch(() => {});
@@ -1025,6 +1083,7 @@ export class VoiceManager {
     this.peers.delete(socketId);
     this.screenQualityForPeer.delete(socketId);
     this.requestedScreenQuality.delete(socketId);
+    this.remoteMicStream.delete(socketId);
     let watchChanged = this.watchers.delete(socketId);
     for (const [viewer, target] of this.watchers.entries()) {
       if (target === socketId) { this.watchers.delete(viewer); watchChanged = true; }
