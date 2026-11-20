@@ -10,6 +10,8 @@ import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import { Server as SocketIOServer } from 'socket.io';
 import { db, initDatabase, sanitizeUser } from './db.js';
+import { registerActivities } from './activities.js';
+import { registerPush, sendPushToUser } from './push.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4000);
@@ -139,13 +141,20 @@ async function hydrateMessage(msg) {
     );
     if (orig) replyTo = { ...orig, content: decryptMessageText(orig.content) };
   }
+  const plain = decryptMessageText(msg.content);
+  // enquete ("/poll ..."): vai junto quem votou em quê
+  let pollVotes;
+  if (/^\/(poll|enquete)\s/i.test(plain)) {
+    pollVotes = await db.all('SELECT user_id, option FROM poll_votes WHERE message_id = ?', msg.id).catch(() => []);
+  }
   return {
+    ...(pollVotes ? { poll_votes: pollVotes } : {}),
     id: msg.id,
     channel_id: msg.channel_id,
     dm_thread_id: msg.dm_thread_id,
     author_id: msg.author_id,
     author: author || { id: msg.author_id, username: 'unknown', display_name: 'Unknown', avatar_color: '#5865F2', status: 'offline' },
-    content: decryptMessageText(msg.content),
+    content: plain,
     attachments: JSON.parse(msg.attachments_json || '[]'),
     reply_to_id: msg.reply_to_id,
     reply_to: replyTo,
@@ -199,6 +208,33 @@ async function userCanAccessChannel(userId, channelId) {
 
 async function userCanAccessDm(userId, threadId) {
   return Boolean(await db.get('SELECT 1 FROM dm_threads WHERE id = ? AND (user1_id = ? OR user2_id = ?)', threadId, userId, userId));
+}
+
+// ===== notificação com a aba fechada (só pra quem não está com o RONNCORD aberto) =====
+async function pushIfAway(userId, data) {
+  if (onlineSockets.get(userId)?.size) return; // tá com o app aberto: o próprio app avisa
+  const u = await db.get('SELECT status FROM users WHERE id = ?', userId);
+  if (!u || u.status === 'dnd') return;
+  await sendPushToUser(userId, data);
+}
+
+async function pushForChannelMessage(channelId, msg) {
+  const text = msg.content || '';
+  const isAviso = /^\/aviso\s+\S/i.test(text);
+  const ch = await db.get('SELECT c.name, c.server_id, s.name AS server_name FROM channels c JOIN servers s ON s.id = c.server_id WHERE c.id = ?', channelId);
+  if (!ch) return;
+  const members = await db.all('SELECT u.id, u.username FROM server_members sm JOIN users u ON u.id = sm.user_id WHERE sm.server_id = ?', ch.server_id);
+  const lower = text.toLowerCase();
+  const everyone = isAviso || /(^|\s)@(everyone|todos|here)\b/i.test(text);
+  for (const m of members) {
+    if (m.id === msg.author_id) continue;
+    if (!everyone && !lower.includes(`@${String(m.username).toLowerCase()}`)) continue;
+    await pushIfAway(m.id, {
+      title: `${isAviso ? '📢 ' : ''}${msg.author?.display_name || 'RONNCORD'} em #${ch.name}`,
+      body: (isAviso ? text.replace(/^\/aviso\s+/i, '') : text).slice(0, 200) || 'Enviou um anexo',
+      tag: `ch-${channelId}`
+    });
+  }
 }
 
 // Health check
@@ -703,6 +739,7 @@ app.post('/api/channels/:channelId/messages', authMiddleware, async (req, res) =
   const hydrated = await hydrateMessage(await db.get('SELECT * FROM messages WHERE id = ?', msgId));
   io.to(`channel:${channelId}`).emit('message:new', hydrated);
   res.status(201).json({ message: hydrated });
+  pushForChannelMessage(channelId, hydrated).catch(() => {});
 });
 
 app.patch('/api/messages/:messageId', authMiddleware, async (req, res) => {
@@ -753,6 +790,28 @@ app.post('/api/messages/:messageId/reactions', authMiddleware, async (req, res) 
   res.json({ message: hydrated });
 });
 
+// votar na enquete: um voto por pessoa; votar de novo na mesma opção tira o voto
+app.post('/api/messages/:messageId/vote', authMiddleware, async (req, res) => {
+  const msg = await db.get('SELECT * FROM messages WHERE id = ?', req.params.messageId);
+  if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+  const hasAccess = msg.channel_id
+    ? await userCanAccessChannel(req.user.id, msg.channel_id)
+    : await userCanAccessDm(req.user.id, msg.dm_thread_id);
+  if (!hasAccess) return res.status(403).json({ error: 'Sem acesso a esta mensagem' });
+  if (!/^\/(poll|enquete)\s/i.test(decryptMessageText(msg.content))) return res.status(400).json({ error: 'Essa mensagem não é enquete' });
+  const option = Number(req.body?.option);
+  if (!Number.isInteger(option) || option < 0 || option > 9) return res.status(400).json({ error: 'Opção inválida' });
+  const current = await db.get('SELECT option FROM poll_votes WHERE message_id = ? AND user_id = ?', msg.id, req.user.id);
+  await db.run('DELETE FROM poll_votes WHERE message_id = ? AND user_id = ?', msg.id, req.user.id);
+  if (!current || current.option !== option) {
+    await db.run('INSERT INTO poll_votes (message_id, user_id, option, created_at) VALUES (?, ?, ?, ?)', msg.id, req.user.id, option, Date.now());
+  }
+  const hydrated = await hydrateMessage(msg);
+  const room = msg.channel_id ? `channel:${msg.channel_id}` : `dm:${msg.dm_thread_id}`;
+  io.to(room).emit('message:updated', hydrated);
+  res.json({ message: hydrated });
+});
+
 app.post('/api/messages/:messageId/pin', authMiddleware, async (req, res) => {
   const msg = await db.get('SELECT * FROM messages WHERE id = ?', req.params.messageId);
   if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
@@ -784,7 +843,7 @@ app.get('/api/friends', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/friends/request', authMiddleware, async (req, res) => {
-  const targetName = String(req.body?.username || '').trim().toLowerCase();
+  const targetName = String(req.body?.username || '').trim().toLowerCase().replace(/^@/, '');
   const target = await db.get('SELECT * FROM users WHERE username = ?', targetName);
   if (!target) return res.status(404).json({ error: 'Usuário não encontrado' });
   if (target.id === req.user.id) return res.status(400).json({ error: 'Você não pode adicionar a si mesmo' });
@@ -793,13 +852,21 @@ app.post('/api/friends/request', authMiddleware, async (req, res) => {
     'SELECT * FROM friendships WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)',
     req.user.id, target.id, target.id, req.user.id
   );
-  if (existing) return res.status(409).json({ error: 'Solicitação ou amizade já existe' });
+  // a outra pessoa já tinha me mandado pedido: aceitar direto (igual Discord)
+  if (existing && existing.status === 'pending' && existing.addressee_id === req.user.id) {
+    await db.run("UPDATE friendships SET status = 'accepted' WHERE id = ?", existing.id);
+    io.to([`user:${req.user.id}`, `user:${target.id}`]).emit('friends:changed', { from: req.user.id, type: 'accept' });
+    return res.json({ ok: true, id: existing.id, accepted: true });
+  }
+  if (existing) return res.status(409).json({ error: existing.status === 'accepted' ? 'Vocês já são amigos' : 'Você já mandou pedido pra essa pessoa' });
 
   const id = crypto.randomUUID();
   await db.run(
     "INSERT INTO friendships (id, requester_id, addressee_id, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
     id, req.user.id, target.id, Date.now()
   );
+  // avisa os dois na hora (quem recebe vê o pedido sem dar F5)
+  io.to([`user:${req.user.id}`, `user:${target.id}`]).emit('friends:changed', { from: req.user.id, type: 'request' });
   res.status(201).json({ ok: true, id });
 });
 
@@ -807,11 +874,14 @@ app.post('/api/friends/:id/accept', authMiddleware, async (req, res) => {
   const f = await db.get('SELECT * FROM friendships WHERE id = ? AND addressee_id = ?', req.params.id, req.user.id);
   if (!f) return res.status(404).json({ error: 'Solicitação não encontrada' });
   await db.run("UPDATE friendships SET status = 'accepted' WHERE id = ?", f.id);
+  io.to([`user:${f.requester_id}`, `user:${f.addressee_id}`]).emit('friends:changed', { from: req.user.id, type: 'accept' });
   res.json({ ok: true });
 });
 
 app.delete('/api/friends/:id', authMiddleware, async (req, res) => {
+  const f = await db.get('SELECT requester_id, addressee_id FROM friendships WHERE id = ? AND (requester_id = ? OR addressee_id = ?)', req.params.id, req.user.id, req.user.id);
   await db.run('DELETE FROM friendships WHERE id = ? AND (requester_id = ? OR addressee_id = ?)', req.params.id, req.user.id, req.user.id);
+  if (f) io.to([`user:${f.requester_id}`, `user:${f.addressee_id}`]).emit('friends:changed', { from: req.user.id, type: 'remove' });
   res.json({ ok: true });
 });
 
@@ -899,6 +969,12 @@ app.post('/api/dms/:threadId/messages', authMiddleware, async (req, res) => {
   const thread = await db.get('SELECT user1_id, user2_id FROM dm_threads WHERE id = ?', req.params.threadId);
   io.to([`dm:${req.params.threadId}`, `user:${thread.user1_id}`, `user:${thread.user2_id}`]).emit('message:new', hydrated);
   res.status(201).json({ message: hydrated });
+  const peerId = thread.user1_id === req.user.id ? thread.user2_id : thread.user1_id;
+  pushIfAway(peerId, {
+    title: req.user.display_name,
+    body: trimmed || 'Enviou um anexo',
+    tag: `dm-${req.params.threadId}`
+  }).catch(() => {});
 });
 
 // Private Encrypted Notes (AES-256-GCM, strict user_id isolation)
@@ -1063,11 +1139,17 @@ io.on('connection', async (socket) => {
     if (!channelId || !(await userCanAccessChannel(userId, channelId))) return;
 
     for (const [prevChId, prevRoom] of voiceRooms.entries()) {
-      if (prevChId !== channelId && prevRoom.has(socket.id)) {
-        prevRoom.delete(socket.id);
-        socket.leave(`voice:${prevChId}`);
-        io.emit('voice:participants', { channelId: prevChId, participants: Array.from(prevRoom.values()) });
+      // tira a entrada velha desta conexão em outra sala e as entradas antigas da MESMA pessoa
+      // (conexão que caiu e voltou com outro id: a velha fica congelada na lista até o ping cair)
+      let changed = false;
+      for (const [sid, p] of prevRoom.entries()) {
+        if ((sid === socket.id && prevChId !== channelId) || (sid !== socket.id && p.userId === userId)) {
+          prevRoom.delete(sid);
+          io.sockets.sockets.get(sid)?.leave(`voice:${prevChId}`);
+          changed = true;
+        }
       }
+      if (changed) io.emit('voice:participants', { channelId: prevChId, participants: Array.from(prevRoom.values()) });
     }
 
     if (!voiceRooms.has(channelId)) voiceRooms.set(channelId, new Map());
@@ -1201,7 +1283,12 @@ io.on('connection', async (socket) => {
   });
 });
 
+// jogos da call (GeoGuessr e Truco): eventos act:* e o ranking do Geo
+registerActivities({ app, io, db, authMiddleware, voiceRooms });
+
 await initDatabase();
+await registerPush({ app, db, authMiddleware });
+await db.exec('CREATE TABLE IF NOT EXISTS poll_votes (message_id TEXT NOT NULL, user_id TEXT NOT NULL, option INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (message_id, user_id))');
 
 // Passos que rodam UMA vez no banco (ficam marcados em app_flags pra não repetir)
 async function runOnce(flag, fn) {
