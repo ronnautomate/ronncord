@@ -29,6 +29,7 @@ import { MusicModal } from './components/MusicModal.jsx';
 import { WhatsNewModal } from './components/WhatsNewModal.jsx';
 import { ServerSettingsModal } from './components/ServerSettingsModal.jsx';
 import { CallStage } from './components/CallStage.jsx';
+import { MiniCall } from './components/MiniCall.jsx';
 import { NOVIDADES, isNew, markSeen } from './lib/novidades.js';
 import './style.css';
 import './discordia-extras.css';
@@ -1744,6 +1745,18 @@ function App() {
         />
       )}
       </div>
+
+      {/* janelinha da stream quando sai da sala pra um chat (igual Discord) */}
+      {voiceChannelId && viewMode !== 'voice' && (
+        <MiniCall
+          videos={remoteVideos.filter(v => !hiddenVideoIds.includes(v.id))}
+          people={callPeople}
+          onOpen={() => {
+            const ch = servers.flatMap(sv => sv.channels || []).find(c => c.id === voiceChannelId);
+            if (ch) openVoiceRoom(ch);
+          }}
+        />
+      )}
 
       {/* Members Sidebar */}
       {(viewMode === 'server' || viewMode === 'voice') && showMembers && activeServer && (
