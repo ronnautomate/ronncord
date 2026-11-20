@@ -65,3 +65,4 @@ export function ActTop({ act, kind, children, right }) {
     </div>
   );
 }
+
