@@ -15,6 +15,10 @@ export const NOVIDADES = {
       text: 'Na stream aparece quem está assistindo, e do lado do AO VIVO fica o número.'
     },
     {
+      title: 'Janelinha da stream',
+      text: 'Saiu da sala pra um canal de texto ou DM? A stream continua numa janelinha no canto, igual o Discord. Arraste pra mudar de lugar e clique pra voltar pra sala.'
+    },
+    {
       title: 'Stream grande em cima',
       text: 'Com alguém transmitindo, a tela fica grande em cima e o pessoal numa fileira embaixo. Arraste a divisa pra fileira ficar maior ou menor.'
     },
