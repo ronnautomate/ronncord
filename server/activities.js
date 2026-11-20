@@ -20,6 +20,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GEO = JSON.parse(fs.readFileSync(path.join(__dirname, 'activities-geo.json'), 'utf8'));
 const GEO_POR_ID = new Map(GEO.locais.map(l => [l.id, l]));
 
+// foto que sumiu do Panoramax (apagada ou bloqueada) sai do sorteio sozinha:
+// confere todas ao ligar e de 6 em 6 horas, devagar (4 de cada vez)
+const GEO_MORTOS = new Set();
+async function conferirFotos() {
+  const fila = [...GEO.locais];
+  const um = async () => {
+    for (let l = fila.shift(); l; l = fila.shift()) {
+      try {
+        const r = await fetch(l.img, { method: 'HEAD', signal: AbortSignal.timeout(20000) });
+        if (r.status === 404 || r.status === 403 || r.status === 410) GEO_MORTOS.add(l.id);
+        else if (r.ok) GEO_MORTOS.delete(l.id);
+      } catch { /* rede falhou: não marca */ }
+    }
+  };
+  await Promise.all([um(), um(), um(), um()]);
+}
+setTimeout(() => { conferirFotos(); setInterval(conferirFotos, 6 * 3600 * 1000).unref?.(); }, 15000).unref?.();
+
 const KINDS = ['geo', 'truco'];
 
 // ---------------- utilidades ----------------
@@ -153,7 +171,7 @@ export function registerActivities({ app, io, db, authMiddleware, voiceRooms }) 
     };
   }
   function geoComecar(g) {
-    const lista = shuffle([...GEO.locais]);
+    const lista = shuffle(GEO.locais.filter(l => !GEO_MORTOS.has(l.id)));
     const escolhidos = [], paises = new Set(); // um local por país
     for (const l of lista) if (escolhidos.length < g.total && !paises.has(l.cc)) { escolhidos.push(l.id); paises.add(l.cc); }
     g.priv.locais = escolhidos;
