@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { NOVIDADES, isNew, seenVersion } from '../lib/novidades.js';
 
@@ -8,10 +8,14 @@ function formatText(text) {
   );
 }
 
-// all = true quando abre pelo botão ✨ (mostra tudo, com NOVO no que a pessoa não viu)
+// sozinho: só o que a pessoa ainda não viu. Botão ✨ (all): a última atualização
+// (mais o que ainda não viu) e o histórico só se ela pedir.
 export function WhatsNewModal({ all = false, onClose }) {
-  const seen = seenVersion();
-  const list = all ? NOVIDADES.items : NOVIDADES.items.filter(it => isNew(it, seen));
+  const [seen] = useState(seenVersion);
+  const [history, setHistory] = useState(false);
+  const recent = NOVIDADES.items.filter(it => (it.since || NOVIDADES.version) === NOVIDADES.version || isNew(it, seen));
+  const list = all ? (history ? NOVIDADES.items : recent) : NOVIDADES.items.filter(it => isNew(it, seen));
+  const hasOlder = all && !history && recent.length < NOVIDADES.items.length;
   const base = import.meta.env.BASE_URL || '/';
 
   return (
@@ -37,6 +41,9 @@ export function WhatsNewModal({ all = false, onClose }) {
               )}
             </div>
           ))}
+          {hasOlder && (
+            <button type="button" className="whats-new-older" onClick={() => setHistory(true)}>Ver atualizações anteriores</button>
+          )}
         </div>
         <div className="whats-new-footer">
           <button type="button" className="btn-primary" onClick={onClose}>Entendi</button>
